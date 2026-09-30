@@ -20,6 +20,7 @@ Each variant corresponds to an NGC CUDA container extended with the Alps HPC sta
 
 | Image | NGC Base | Use Case |
 |---------|----------|----------|
+| `pytorch-cuda:26.07-py3-alps7-dev` | `nvcr.io/nvidia/pytorch:26.07-py3`             | GPU-accelerated PyTorch workloads |
 | `pytorch-cuda:26.06-py3-alps7-dev` | `nvcr.io/nvidia/pytorch:26.06-py3`             | GPU-accelerated PyTorch workloads |
 | `pytorch-cuda:26.02-py3-alps7-dev` | `nvcr.io/nvidia/pytorch:26.02-py3`             | GPU-accelerated PyTorch workloads |
 | `pytorch-cuda:26.01-py3-alps7-dev` | `nvcr.io/nvidia/pytorch:26.01-py3`             | GPU-accelerated PyTorch workloads |
@@ -47,6 +48,7 @@ Application images are built on top of accelerator-specific base images and incl
 | `sfttrainer-cuda:alps7-dev`  | `pytorch-cuda:26.02-py3` | Supervised fine-tuning trainer image |
 | `verl-cuda:alps7-dev`        | `pytorch-cuda:26.02-py3` | VeRL reinforcement learning workloads |
 | `vllm-cuda:alps7-dev`        | `pytorch-cuda:26.02-py3` | vLLM serving workloads built from source with Alps/NVIDIA PyTorch compatibility patches |
+| `vllm-apertus2-cuda:alps7-dev` | `pytorch-cuda:26.07-py3` | Apertus2 vLLM 0.28 with UCCL EP/P2P and NIXL CXI KV transfer |
 | `vllm-rocm:alps7-dev`        | `pytorch-rocm:rocm7.14-ubuntu24.04-py3.12-torch2.11` | vLLM serving workloads built from source for ROCm/MI300 |
 
 ## HPC Stack Components
