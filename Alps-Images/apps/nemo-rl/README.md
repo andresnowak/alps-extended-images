@@ -61,7 +61,9 @@ earlier package, and only a check after the last layer sees it.
 
 vLLM is built in a separate stage so its build dependencies do not alter the
 NeMo-RL runtime stack. Its requirements are filtered to preserve NGC torch and
-the CUDA toolkit, and runtime resolution protects NeMo Gym's `openai==2.7.2`
+the CUDA toolkit. A targeted Torch override also keeps the exact NGC prerelease
+when transitive metadata requests a stable Torch release. Runtime resolution
+protects NeMo Gym's `openai==2.7.2`
 and NeMo-RL's Ray pin. FlashInfer (`0.6.16.post3`), TVM FFI (`0.1.11`), CUTLASS DSL
 (`4.6.2`), NVTX (`0.2.15`) and Transformers (`5.17.0`) align with the vLLM stack.
 

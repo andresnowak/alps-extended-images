@@ -108,7 +108,8 @@ RUN set -eux; \
       v="$(python3 -c "import importlib.metadata as m; print(m.version('${p}'))" 2>/dev/null || true)"; \
       if [[ -n "${v}" ]]; then echo "${p}==${v}" >> /opt/alps/base-pins.txt; fi; \
     done; \
-    cat /opt/alps/base-pins.txt
+    cat /opt/alps/base-pins.txt; \
+    grep '^torch==' /opt/alps/base-pins.txt > /opt/alps/torch-override.txt
 
 # Build vLLM in an isolated stage so its build environment cannot alter NeMo.
 FROM uv-base AS vllm-builder
@@ -158,8 +159,10 @@ RUN set -eux; \
       -r /tmp/vllm-build-requirements.txt; \
     awk 'BEGIN { IGNORECASE=1 } !($0 ~ /^torch==/ || $0 ~ /^torchaudio==/ || $0 ~ /^torchvision==/ || $0 ~ /^cuda-toolkit/ || $0 ~ /^nvidia-cuda-/ || $0 ~ /^nvidia-nvjitlink/ || $0 ~ /^nvidia-nvvm/) { print }' \
       requirements/cuda.txt > requirements/cuda-alps.txt; \
+    # NGC's 2.10.0a0 build sorts below torch>=2.10.0 in transitive metadata.
+    # Override only torch with the captured base version, never a PyPI wheel.
     uv pip install --system --no-cache -c /opt/alps/base-pins.txt -c /tmp/vllm-build-constraints.txt \
-      -r requirements/cuda-alps.txt; \
+      --overrides /opt/alps/torch-override.txt -r requirements/cuda-alps.txt; \
     mkdir -p /opt/artifacts/vllm; \
     uv build --wheel --no-build-isolation --no-cache --python python3 --out-dir /opt/artifacts/vllm .; \
     cp -a requirements /opt/artifacts/vllm/
@@ -477,6 +480,7 @@ RUN set -eux; \
       > /tmp/vllm-runtime-constraints.txt; \
     uv pip install --system --no-cache \
       -c /opt/alps/base-pins.txt -c /tmp/vllm-runtime-constraints.txt \
+      --overrides /opt/alps/torch-override.txt \
       -r /opt/wheels/vllm/requirements/cuda-alps.txt "runai-model-streamer==0.15.7"; \
     uv pip install --system --no-cache -c /opt/alps/base-pins.txt \
       --no-deps /opt/wheels/vllm/vllm-*.whl; \
