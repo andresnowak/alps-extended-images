@@ -327,12 +327,17 @@ RUN set -eux; \
       "git+${EMERGING_OPTIMIZERS_REPO}@${EMERGING_OPTIMIZERS_COMMIT}"
 
 # ---- flash-linear-attention (KDA kernels) -----------------------------------
-ARG FLA_TAG=v0.5.2
+# Swiss-AI v0.5.2 baseline plus per-channel A_log support for Megachonk.
+# NOTE: this is only needed because we have problems with cache in Megatron LM MoE when training Megachonk
+# (I believe cache creation takes to much time just because of number of nodes and maybe it is taking a variable path, variable meaning number of tokens changing in some parts, but it shouldn't not sure).
+# This should be changed to upstream basically
+ARG FLA_REPO=https://github.com/swiss-ai/flash-linear-attention.git
+ARG FLA_COMMIT=1820dba7e15fb927294779f23ac5097eb3927b25
 RUN set -eux; \
     uv pip uninstall --system flash-linear-attention; \
     uv pip install --system --no-cache --no-build-isolation \
       -c /opt/alps/base-pins.txt \
-      "git+https://github.com/fla-org/flash-linear-attention@${FLA_TAG}"
+      "git+${FLA_REPO}@${FLA_COMMIT}"
 
 # ---- NeMo-RL runtime stack --------------------------------------------------
 # The base image ships neither ray nor flashinfer. NeMo-RL hardcodes

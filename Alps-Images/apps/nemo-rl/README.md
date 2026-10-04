@@ -32,7 +32,7 @@ podman build -f Alps-Images/apps/nemo-rl/Containerfile \
 | grouped_gemm | `FFGGSSJJ/grouped_gemm@45118e54` | MoE GEMM with gradient-accumulation fusion |
 | nvidia-resiliency-ext | `0.6.0` | first release containing the commit Megatron-LM pins (`15a85156`); older ones break async checkpoint save |
 | Emerging-Optimizers | `FFGGSSJJ@cc1385ee` | decoupled Muon (`md_decoupling`) |
-| flash-linear-attention | `v0.5.2` | KDA kernels |
+| flash-linear-attention | `swiss-ai/flash-linear-attention@1820dba7e15fb927294779f23ac5097eb3927b25` | v0.5.2 plus one commit adding per-channel `A_log` support in KDA decay gates |
 | ray | `2.56.1` | NeMo-RL worker runtime; not in the base image |
 | flashinfer-python | `0.6.16.post3` | **required**, not optional: NeMo-RL hardcodes `sampling_backend="flashinfer"` in its Megatron worker, so `InferenceConfig.__post_init__` raises `ImportError` without it |
 | openai | `2.7.2` | nemo-gym requires `<=2.7.2` and pins each child server venv to the *parent* version, so a newer parent makes every Gym venv unresolvable |
