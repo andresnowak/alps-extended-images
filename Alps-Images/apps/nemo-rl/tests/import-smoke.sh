@@ -20,9 +20,14 @@ EXPECTED = {
     "ray": "2.56.",
     "openai": "2.7.2",
     "megatron-energon": "7.4.0",
-    "transformers": "5.8.1",
+    "transformers": "5.17.0",
     "hydra-core": "1.3.2",
-    "flashinfer-python": "0.6.18",
+    "flashinfer-python": "0.6.16.post3",
+    "apache-tvm-ffi": "0.1.11",
+    "tilelang": "0.1.12",
+    "nvidia-cutlass-dsl": "4.6.2",
+    "vllm": "0.28.0+apertus2",
+    "runai-model-streamer": "0.15.7",
 }
 for pkg, prefix in EXPECTED.items():
     got = md.version(pkg)
@@ -31,12 +36,12 @@ for pkg, prefix in EXPECTED.items():
 
 REQUIRED = [
     # NeMo-RL core
-    "ray", "hydra", "omegaconf", "transformers", "megatron.energon",
+    "ray", "hydra", "omegaconf", "transformers", "megatron.energon", "vllm",
     "math_verify", "mlflow", "tensordict", "swanlab", "zstandard", "openai",
     "wandb", "datasets", "accelerate", "torchdata", "tiktoken", "sentencepiece",
     # Megatron generation backend: NeMo-RL hardcodes sampling_backend="flashinfer",
     # so InferenceConfig.__post_init__ raises ImportError without these two.
-    "tvm_ffi", "flashinfer",
+    "tvm_ffi", "flashinfer", "tilelang",
     # policy / kernel stack
     "transformer_engine.pytorch", "deep_gemm", "grouped_gemm",
     "emerging_optimizers", "fla",
@@ -59,5 +64,9 @@ for name in REQUIRED:
 
 from flashinfer.sampling import top_k_top_p_sampling_from_probs  # noqa: F401
 from deep_ep import Buffer  # noqa: F401
+from vllm.model_executor.models.apertus2 import Apertus2KDAForCausalLM
+from vllm.third_party.flash_linear_attention.ops.kda import FusedRMSNormGated
+
+print("Apertus2 vLLM:", Apertus2KDAForCausalLM, FusedRMSNormGated)
 print("all imports ok")
 PY
