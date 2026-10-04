@@ -113,6 +113,11 @@ RUN set -eux; \
 # Build vLLM in an isolated stage so its build environment cannot alter NeMo.
 FROM uv-base AS vllm-builder
 
+# Redeclare build-only uv settings: the CI Podman builder does not propagate
+# these ARGs from uv-base into derived stages.
+ARG UV_BREAK_SYSTEM_PACKAGES=1
+ARG UV_PYTHON_DOWNLOADS=never
+
 ARG VLLM_REPO=https://github.com/swiss-ai/vllm.git
 ARG VLLM_REF=d4d41485a1cc1aee0d906d19f41523d2fdc67463
 ARG VLLM_MAX_JOBS=32
@@ -162,6 +167,9 @@ RUN set -eux; \
 RUN test "$(find /opt/artifacts/vllm -maxdepth 1 -name 'vllm-*.whl' | wc -l)" -eq 1
 
 FROM uv-base AS runtime
+ARG UV_BREAK_SYSTEM_PACKAGES=1
+ARG UV_PYTHON_DOWNLOADS=never
+
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 COPY --from=vllm-builder /opt/artifacts/vllm/ /opt/wheels/vllm/
 
