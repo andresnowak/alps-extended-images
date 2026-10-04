@@ -159,7 +159,7 @@ RUN set -eux; \
       -r /tmp/vllm-build-requirements.txt; \
     awk 'BEGIN { IGNORECASE=1 } !($0 ~ /^torch==/ || $0 ~ /^torchaudio==/ || $0 ~ /^torchvision==/ || $0 ~ /^cuda-toolkit/ || $0 ~ /^nvidia-cuda-/ || $0 ~ /^nvidia-nvjitlink/ || $0 ~ /^nvidia-nvvm/) { print }' \
       requirements/cuda.txt > requirements/cuda-alps.txt; \
-    # NGC's 2.10.0a0 build sorts below torch>=2.10.0 in transitive metadata.
+    # NGC prereleases can sort below stable-version floors in dependency metadata.
     # Override only torch with the captured base version, never a PyPI wheel.
     uv pip install --system --no-cache -c /opt/alps/base-pins.txt -c /tmp/vllm-build-constraints.txt \
       --overrides /opt/alps/torch-override.txt -r requirements/cuda-alps.txt; \
@@ -190,8 +190,8 @@ ARG UCCL_CUDA_ARCH=9.0   # GH200 = Hopper (sm_90)
 ARG UCCL_MAX_JOBS=8
 # NB: UCCL_NVL_PEERS / UCCL_CUDA_ARCH / UCCL_MAX_JOBS are deliberately NOT named
 # NUM_MAX_NVL_PEERS / TORCH_CUDA_ARCH_LIST / MAX_JOBS. An ENV in the base image
-# beats an ARG of the same name, and this image ships TORCH_CUDA_ARCH_LIST="8.0 8.6
-# 9.0 10.0 11.0 12.0+PTX" — which silently won, built all seven gencodes, and
+# beats an ARG of the same name. The original 25.12 base shipped
+# TORCH_CUDA_ARCH_LIST="8.0 8.6 9.0 10.0 11.0 12.0+PTX", which won and
 # exhausted the container fd limit mid-build.
 #
 # Sources are fetched by commit sha into an empty repo rather than cloned: a full
@@ -255,13 +255,9 @@ ARG TE_TAG=v2.17
 # name, the same trap documented for the UCCL build args above. Left well below the
 # 288 cores an exclusive GH200 node has, since each nvcc job is memory-hungry.
 ARG TE_MAX_JOBS=64
-# NVTE_WITH_NCCL_EP=0 is required on this base, not an optimisation: TE 2.17's NCCL
-# expert-parallel extension includes
-#   torch/csrc/distributed/c10d/symm_mem/nccl_dev_cap.hpp
-# which the NGC 25.12 torch (2.10.0a0+nv25.12) does not ship, so ep.cpp fails to
-# compile. TE only auto-skips that extension when no arch >= 90 is targeted
-# (build_tools/utils.py:nccl_ep_enabled) and GH200 is sm_90, so it must be turned
-# off by hand. ep.cpp no-ops at the #ifdef boundary without the define.
+# Keep TE's NCCL expert-parallel extension disabled: this image uses UCCL-EP.
+# This also preserves the original 25.12 build configuration, where Torch lacked
+# the nccl_dev_cap.hpp header required by TE 2.17's NCCL EP extension.
 RUN set -eux; \
     uv pip uninstall --system transformer_engine transformer_engine_cu13; \
     MAX_JOBS="${TE_MAX_JOBS}" \
@@ -272,7 +268,7 @@ RUN set -eux; \
       "git+https://github.com/NVIDIA/TransformerEngine.git@${TE_TAG}"
 
 # ---- DeepGEMM (FP8 grouped GEMM) --------------------------------------------
-ARG DEEPGEMM_REPO=https://github.com/FFGGSSJJ/DeepGEMM.git
+ARG DEEPGEMM_REPO=https://github.com/deepseek-ai/DeepGEMM.git
 ARG DEEPGEMM_COMMIT=559d79fb6994a58b8a15b4b93bf13ccc16edf247
 RUN set -eux; \
     uv pip uninstall --system deep_gemm; \

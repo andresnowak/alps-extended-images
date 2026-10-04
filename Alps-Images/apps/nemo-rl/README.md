@@ -17,7 +17,7 @@ The build context is the repository root, not this directory: the
 
 ```bash
 podman build -f Alps-Images/apps/nemo-rl/Containerfile \
-  --build-arg BASE_IMAGE=jfrog.svc.cscs.ch/docker-group-csstaff/alps-images/pytorch-cuda:25.12-py3-alps7-dev \
+  --build-arg BASE_IMAGE=jfrog.svc.cscs.ch/docker-group-csstaff/alps-images/pytorch-cuda:26.06-py3-alps7-dev \
   -t nemo-rl:local .
 ```
 
@@ -28,7 +28,7 @@ podman build -f Alps-Images/apps/nemo-rl/Containerfile \
 | UCCL-EP | `andresnowak/uccl@0c166355310a04b2344ca0c5c0df818b04d26af0` | same source pin and 8 build jobs as `app/vllm-apertus2`; `uccl.ep` + the `deep_ep` wrapper for Megatron's flex dispatcher |
 | vLLM | `swiss-ai/vllm@d4d41485a1cc1aee0d906d19f41523d2fdc67463` | Apertus2 KDA support; built against NGC torch with 32 build jobs and 4 NVCC threads |
 | TransformerEngine | `v2.17` | CUDA graph support; this is megachonk's TE, one minor above the `te212` sibling image |
-| DeepGEMM | `FFGGSSJJ/DeepGEMM@559d79fb` | FP8 grouped GEMM |
+| DeepGEMM | `deepseek-ai/DeepGEMM@559d79fb` | FP8 grouped GEMM |
 | grouped_gemm | `FFGGSSJJ/grouped_gemm@45118e54` | MoE GEMM with gradient-accumulation fusion |
 | nvidia-resiliency-ext | `0.6.0` | first release containing the commit Megatron-LM pins (`15a85156`); older ones break async checkpoint save |
 | Emerging-Optimizers | `FFGGSSJJ@cc1385ee` | decoupled Muon (`md_decoupling`) |
@@ -58,6 +58,11 @@ holds the version it asked for: a later `uv pip install` is free to upgrade an
 earlier package, and only a check after the last layer sees it.
 
 ## Alignment with `app/vllm-apertus2`
+
+The base is `pytorch-cuda:26.06-py3` (NGC Torch `2.13.0a0`), rather than the original
+25.12 base. The selected vLLM commit targets the Torch 2.11 stable C++ ABI, whose
+headers and APIs are missing from the original NGC Torch 2.10 build. Torch still
+comes exclusively from the NGC base; no replacement PyPI Torch is installed.
 
 vLLM is built in a separate stage so its build dependencies do not alter the
 NeMo-RL runtime stack. Its requirements are filtered to preserve NGC torch and
