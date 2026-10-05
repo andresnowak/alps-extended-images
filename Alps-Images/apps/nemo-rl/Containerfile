@@ -192,8 +192,8 @@ COPY --from=vllm-builder /opt/artifacts/vllm/ /opt/wheels/vllm/
 # ---- Complete UCCL (EP, P2P and DeepEP wrapper) -----------------------------
 # Match app/vllm-apertus2's full CUDA 13 wheel and public P2P library/headers,
 # including the DeepEP wrapper used by Megatron's flex dispatcher.
-ARG UCCL_REPO=https://github.com/andresnowak/uccl.git
-ARG UCCL_REF=0c166355310a04b2344ca0c5c0df818b04d26af0
+ARG UCCL_REPO=https://github.com/uccl-project/uccl.git
+ARG UCCL_REF=540cc775ba8ab231122f9a98a6d832699f239f70
 ARG NANOBIND_VERSION=3.0.1
 ARG UCCL_NVL_PEERS=4     # NVLink peers per node (GH200: 4 GPUs/node)
 ARG UCCL_CUDA_ARCH=9.0   # GH200 = Hopper (sm_90)

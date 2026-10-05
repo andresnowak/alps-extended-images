@@ -25,7 +25,7 @@ podman build -f Alps-Images/apps/nemo-rl/Containerfile \
 
 | Component | Pin | Why |
 |---|---|---|
-| UCCL | `andresnowak/uccl@0c166355310a04b2344ca0c5c0df818b04d26af0` | complete CUDA 13 wheel, EP and P2P extensions, public P2P library/headers and packaged DeepEP wrapper; same full build and 8 jobs as `app/vllm-apertus2` |
+| UCCL | `uccl-project/uccl@540cc775ba8ab231122f9a98a6d832699f239f70` | complete CUDA 13 wheel, EP and P2P extensions, public P2P library/headers and packaged DeepEP wrapper; same full build and 8 jobs as `app/vllm-apertus2` |
 | NIXL | `ai-dynamo/nixl@de8115ca97d3f8fb63a4988e9b4d4a038b2e0f72` (`1.3.2`) | CUDA 13 bindings and UCCL plugin, built with the same Meson options as `app/vllm-apertus2` |
 | vLLM | `swiss-ai/vllm@d4d41485a1cc1aee0d906d19f41523d2fdc67463` | Apertus2 KDA support; NGC torch, 32 build jobs and 4 NVCC threads; Rust 1.93.0 builds the required Rust frontend and tool parser |
 | TransformerEngine | `v2.17` | CUDA graph support; this is megachonk's TE, one minor above the `te212` sibling image |
@@ -77,7 +77,10 @@ protects NeMo Gym's `openai==2.7.2`
 and NeMo-RL's Ray pin. FlashInfer (`0.6.16.post3`), TVM FFI (`0.1.11`), CUTLASS DSL
 (`4.6.2`), NVTX (`0.2.15`) and Transformers (`5.17.0`) align with the vLLM stack.
 
-UCCL uses the complete `BUILD_TYPE=all` CUDA 13 build, not an EP-only install.
+UCCL is pinned to upstream `uccl-project/uccl` main at
+`540cc775ba8ab231122f9a98a6d832699f239f70` (2026-10-05), including the P2P OOB
+server deadlock fix for connections dropped mid-parse. It uses the complete
+`BUILD_TYPE=all` CUDA 13 build, not an EP-only install.
 The image includes `uccl.ep`, `uccl.p2p`, the wheel-packaged `deep_ep` wrapper,
 and the public P2P headers/library needed to build NIXL's UCCL plugin. Both EP
 and P2P select CXI, with `UCCL_CXI_THREADING=safe`. NIXL's `nixl` and `nixl-cu13`
