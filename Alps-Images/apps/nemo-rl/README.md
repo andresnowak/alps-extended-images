@@ -27,6 +27,7 @@ podman build -f Alps-Images/apps/nemo-rl/Containerfile \
 |---|---|---|
 | UCCL | `uccl-project/uccl@540cc775ba8ab231122f9a98a6d832699f239f70` | complete CUDA 13 wheel, EP and P2P extensions, public P2P library/headers and packaged DeepEP wrapper; same full build and 8 jobs as `app/vllm-apertus2` |
 | NIXL | `ai-dynamo/nixl@de8115ca97d3f8fb63a4988e9b4d4a038b2e0f72` (`1.3.2`) | CUDA 13 bindings and UCCL plugin, built with the same Meson options as `app/vllm-apertus2` |
+| NCCL Extensions | `nccl-extensions[cu13]==0.1.0` | NVIDIA's packaged `nccl.ep` and `nccl.m2n` Python APIs and native CUDA 13 libraries; pins NCCL `2.30.7`, matching the base |
 | vLLM | `swiss-ai/vllm@d4d41485a1cc1aee0d906d19f41523d2fdc67463` | Apertus2 KDA support; NGC torch, 32 build jobs and 4 NVCC threads; Rust 1.93.0 builds the required Rust frontend and tool parser |
 | TransformerEngine | `v2.17` | CUDA graph support; this is megachonk's TE, one minor above the `te212` sibling image |
 | DeepGEMM | `deepseek-ai/DeepGEMM@559d79fb` | FP8 grouped GEMM |
@@ -87,6 +88,23 @@ and P2P select CXI, with `UCCL_CXI_THREADING=safe`. NIXL's `nixl` and `nixl-cu13
 packages come from the same pinned source and plugin build as the vLLM image;
 the generic PyPI NIXL wheel is not used. GPU smoke tests check the P2P and DeepEP
 APIs, CUDA 13 bindings, and discovery of the UCCL backend by an actual NIXL agent.
+
+## NCCL Extensions
+
+[NVIDIA NCCL Extensions](https://github.com/NVIDIA/nccl-extensions) is installed
+from its prebuilt `0.1.0` wheel with the CUDA 13 extra, not from a source-only
+install that omits the native libraries. It shares the `nccl` namespace with
+NCCL4Py and provides both expert-parallel dispatch/combine (`nccl.ep`) and
+mesh-to-mesh resharding (`nccl.m2n`). The extra requires NCCL `2.30.7`; build
+checks verify the package pins, CUDA 13 artifacts and linkage, and GPU smoke
+checks query the loaded NCCL runtime version and verify both native extension
+libraries.
+NCCL EP compiles kernels at runtime using the image's CUDA toolkit and defaults
+to a node-local `/tmp/nccl_ep/jit` cache.
+
+This does not switch NeMo-RL away from UCCL or enable TransformerEngine's NCCL
+EP integration. Import/library checks do not establish multi-node GIN support
+on Slingshot/CXI; that transport combination needs separate runtime validation.
 
 ## What the image does not contain
 

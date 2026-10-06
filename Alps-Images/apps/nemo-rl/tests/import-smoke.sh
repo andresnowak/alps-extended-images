@@ -7,8 +7,10 @@
 set -euo pipefail
 
 python3 - <<'PY'
+import ctypes
 import importlib
 import importlib.metadata as md
+from pathlib import Path
 
 import torch
 
@@ -32,6 +34,8 @@ EXPECTED = {
     "deep-ep": "0.1.0",
     "nixl": "1.3.2",
     "nixl-cu13": "1.3.2",
+    "nccl-extensions": "0.1.0",
+    "nvidia-nccl-cu13": "2.30.7",
 }
 for pkg, prefix in EXPECTED.items():
     got = md.version(pkg)
@@ -61,11 +65,29 @@ REQUIRED = [
     "causal_conv1d", "mamba_ssm", "cutlass", "flash_kda",
     # refit / data-plane transports
     # nccl4py imports as `nccl`; TransferQueue as `transfer_queue`
-    "awscrt", "nccl", "nixl", "transfer_queue",
+    "awscrt", "nccl", "nccl.ep", "nccl.m2n", "nixl", "transfer_queue",
 ]
 for name in REQUIRED:
     importlib.import_module(name)
     print("ok        ", name)
+
+import nccl.ep as nccl_ep
+import nccl.m2n as nccl_m2n
+
+# Query the runtime: PyTorch's version helper can report its build-time headers.
+nccl_lib = ctypes.CDLL("libnccl.so.2")
+nccl_lib.ncclGetVersion.argtypes = [ctypes.POINTER(ctypes.c_int)]
+nccl_lib.ncclGetVersion.restype = ctypes.c_int
+nccl_version = ctypes.c_int()
+assert nccl_lib.ncclGetVersion(ctypes.byref(nccl_version)) == 0
+assert nccl_version.value == 23007, nccl_version.value
+assert str(nccl_ep.get_lib_version()) == "0.1.0", nccl_ep.get_lib_version()
+ep_lib = nccl_ep.get_lib_path()
+assert ep_lib and ep_lib.is_file() and "cu13" in ep_lib.parts, ep_lib
+m2n_lib = Path(nccl_m2n.__file__).parent / "lib/cu13/libnccl_m2n.so"
+assert m2n_lib.is_file(), m2n_lib
+ctypes.CDLL(str(m2n_lib))
+print("NCCL extensions CUDA 13:", ep_lib, m2n_lib)
 
 from flashinfer.sampling import top_k_top_p_sampling_from_probs  # noqa: F401
 from uccl import ep, p2p
