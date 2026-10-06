@@ -81,7 +81,8 @@ nccl_lib.ncclGetVersion.restype = ctypes.c_int
 nccl_version = ctypes.c_int()
 assert nccl_lib.ncclGetVersion(ctypes.byref(nccl_version)) == 0
 assert nccl_version.value == 23007, nccl_version.value
-assert str(nccl_ep.get_lib_version()) == "0.1.0", nccl_ep.get_lib_version()
+# The 0.1.0 Python wheel bundles the independently versioned EP library 0.2.0.
+assert str(nccl_ep.get_lib_version()) == "0.2.0", nccl_ep.get_lib_version()
 ep_lib = nccl_ep.get_lib_path()
 assert ep_lib and ep_lib.is_file() and "cu13" in ep_lib.parts, ep_lib
 m2n_lib = Path(nccl_m2n.__file__).parent / "lib/cu13/libnccl_m2n.so"

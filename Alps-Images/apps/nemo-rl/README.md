@@ -93,7 +93,9 @@ APIs, CUDA 13 bindings, and discovery of the UCCL backend by an actual NIXL agen
 
 [NVIDIA NCCL Extensions](https://github.com/NVIDIA/nccl-extensions) is installed
 from its prebuilt `0.1.0` wheel with the CUDA 13 extra, not from a source-only
-install that omits the native libraries. It shares the `nccl` namespace with
+install that omits the native libraries. The Python distribution is `0.1.0`,
+while its bundled EP native library is independently versioned as `0.2.0`.
+It shares the `nccl` namespace with
 NCCL4Py and provides both expert-parallel dispatch/combine (`nccl.ep`) and
 mesh-to-mesh resharding (`nccl.m2n`). The extra requires NCCL `2.30.7`; build
 checks verify the package pins, CUDA 13 artifacts and linkage, and GPU smoke
