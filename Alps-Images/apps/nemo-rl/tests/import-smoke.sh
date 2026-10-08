@@ -122,6 +122,10 @@ PY
 [[ "${UCCL_CXI_THREADING:-}" == safe ]]
 [[ -f "${NIXL_PLUGIN_DIR:?}/libplugin_UCCL.so" ]]
 
+# Package additions include native GPU checks (FWHT, CuPy, cuFFTDx) and local
+# fixtures only; the script performs no installs, downloads, or model fetches.
+python3 /opt/tests/nemo-rl/package-additions-smoke.py
+
 # As in the vLLM test, isolate the process-lifetime UCCL accept threads so Python
 # teardown cannot hang this probe after its assertions have passed.
 python3 - <<'PY'

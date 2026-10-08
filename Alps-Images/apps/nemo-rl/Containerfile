@@ -182,12 +182,60 @@ RUN set -eux; \
 
 RUN test "$(find /opt/artifacts/vllm -maxdepth 1 -name 'vllm-*.whl' | wc -l)" -eq 1
 
+# fast-hadamard-transform's PyPI sdist omits a required C++ source file. Build
+# the complete, unmodified upstream v1.1.0 release source against the selected
+# NGC Torch/CUDA stack, then install its wheel into the runtime stage.
+FROM uv-base AS hadamard-builder
+ARG HADAMARD_REPO=https://github.com/Dao-AILab/fast-hadamard-transform.git
+ARG HADAMARD_REF=1cc807efbd6cc001df359822d60bf6052dd66859
+ARG HADAMARD_CUDA_ARCH=9.0
+ARG HADAMARD_MAX_JOBS=8
+RUN set -eux; \
+    source /opt/alps/package-helpers.sh; \
+    git clone --filter=blob:none "${HADAMARD_REPO}" /tmp/fast-hadamard-transform; \
+    git -C /tmp/fast-hadamard-transform checkout -q "${HADAMARD_REF}"; \
+    test "$(git -C /tmp/fast-hadamard-transform rev-parse HEAD)" = "${HADAMARD_REF}"; \
+    mkdir -p /opt/wheels/hadamard; \
+    TORCH_CUDA_ARCH_LIST="${HADAMARD_CUDA_ARCH}" MAX_JOBS="${HADAMARD_MAX_JOBS}" \
+      python3 -m pip wheel --no-cache-dir \
+        --no-deps --no-build-isolation --wheel-dir /opt/wheels/hadamard \
+        /tmp/fast-hadamard-transform; \
+    test "$(find /opt/wheels/hadamard -maxdepth 1 -name 'fast_hadamard_transform-*.whl' | wc -l)" -eq 1; \
+    rm -rf /tmp/fast-hadamard-transform
+
+# Build only the GH200 SM90a FlashInfer cache assets. The architecture is explicit
+# because source builds must not probe for a CUDA device on the builder.
+FROM uv-base AS flashinfer-cache-builder
+ARG UV_BREAK_SYSTEM_PACKAGES=1
+ARG UV_PYTHON_DOWNLOADS=never
+ARG FLASHINFER_CACHE_REPO=https://github.com/flashinfer-ai/flashinfer.git
+ARG FLASHINFER_CACHE_REF=9dc1b2495b40314dec8a8cde8cd7faf5c5206702
+ARG FLASHINFER_CACHE_ARCH=9.0a
+ARG FLASHINFER_CACHE_TVM_FFI_VERSION=0.1.11
+RUN set -eux; \
+    source /opt/alps/package-helpers.sh; \
+    uv pip install --system --no-cache -c /opt/alps/base-pins.txt \
+      'setuptools>=77' 'packaging>=24' wheel tqdm ninja requests nvidia-ml-py \
+      "apache-tvm-ffi==${FLASHINFER_CACHE_TVM_FFI_VERSION}"; \
+    git clone --recursive --branch v0.6.16.post3 "${FLASHINFER_CACHE_REPO}" /tmp/flashinfer; \
+    git -C /tmp/flashinfer checkout -q "${FLASHINFER_CACHE_REF}"; \
+    git -C /tmp/flashinfer submodule update --init --recursive; \
+    test "$(git -C /tmp/flashinfer rev-parse HEAD)" = "${FLASHINFER_CACHE_REF}"; \
+    mkdir -p /opt/wheels/flashinfer-cache; \
+    cd /tmp/flashinfer/flashinfer-jit-cache; \
+    FLASHINFER_CUDA_ARCH_LIST="${FLASHINFER_CACHE_ARCH}" CUDA_HOME=/usr/local/cuda \
+      python3 -m pip wheel --no-cache-dir \
+        --no-deps --no-build-isolation --wheel-dir /opt/wheels/flashinfer-cache .; \
+    test "$(find /opt/wheels/flashinfer-cache -maxdepth 1 -name 'flashinfer_jit_cache-0.6.16.post3-*.whl' | wc -l)" -eq 1; \
+    rm -rf /tmp/flashinfer
+
 FROM uv-base AS runtime
 ARG UV_BREAK_SYSTEM_PACKAGES=1
 ARG UV_PYTHON_DOWNLOADS=never
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 COPY --from=vllm-builder /opt/artifacts/vllm/ /opt/wheels/vllm/
+COPY Alps-Images/apps/nemo-rl/sources/package-additions.in /opt/alps/package-additions.in
 
 # ---- Complete UCCL (EP, P2P and DeepEP wrapper) -----------------------------
 # Match app/vllm-apertus2's full CUDA 13 wheel and public P2P library/headers,
@@ -380,6 +428,7 @@ RUN set -eux; \
 # every Gym child venv unresolvable. NeMo-RL core never imports openai.
 ARG RAY_VERSION=2.56.1
 ARG FLASHINFER_VERSION=0.6.16.post3
+ARG FLASHINFER_CACHE_VERSION=0.6.16.post3
 ARG TVM_FFI_VERSION=0.1.11
 # TODO: Restore parallel uv installs once the datasets/packaged_modules EEXIST
 # failure on fuse-overlayfs is resolved; serialization slows this runtime install.
@@ -564,7 +613,7 @@ RUN set -eux; \
 # Install vLLM runtime requirements with the NeMo API/runtime pins protected.
 # Install its source-built wheel without dependencies to preserve NGC torch.
 RUN set -eux; \
-    printf 'openai==2.7.2\nray==2.56.1\ntransformers==5.17.0\nflashinfer-python==0.6.16.post3\napache-tvm-ffi==0.1.11\nnvidia-cutlass-dsl==4.6.2\nnvtx==0.2.15\nprotobuf>=5.29.6,<7\n' \
+    printf 'openai==2.7.2\nray==2.56.1\ntransformers==5.17.0\nflashinfer-python==0.6.16.post3\napache-tvm-ffi==0.1.11\nnvidia-cutlass-dsl==4.6.2\nnvtx==0.2.15\nopentelemetry-api==1.45.1\nopentelemetry-sdk==1.45.1\nopentelemetry-exporter-otlp-proto-grpc==1.45.1\nopentelemetry-exporter-otlp-proto-http==1.45.1\nprotobuf==6.33.6\n' \
       > /tmp/vllm-runtime-constraints.txt; \
     uv pip install --system --no-cache \
       -c /opt/alps/base-pins.txt -c /tmp/vllm-runtime-constraints.txt \
@@ -575,7 +624,55 @@ RUN set -eux; \
     torch_lib_dir="$(python3 -c 'import os, torch; print(os.path.join(os.path.dirname(torch.__file__), "lib"))')"; \
     printf '%s\n' "${torch_lib_dir}" > /etc/ld.so.conf.d/99-alps-vllm-torch.conf; \
     ldconfig; \
-    rm -rf /opt/wheels /tmp/vllm-runtime-constraints.txt
+    rm -rf /opt/wheels
+
+# Install the source-built SM90a cache after every broad wheel cleanup.
+COPY --from=flashinfer-cache-builder /opt/wheels/flashinfer-cache/ /opt/wheels/flashinfer-cache/
+RUN set -eux; \
+    uv pip install --system --no-cache --no-deps \
+      /opt/wheels/flashinfer-cache/flashinfer_jit_cache-*.whl; \
+    test "$(python3 -c 'import importlib.metadata as m; print(m.version("flashinfer-jit-cache"))')" = "${FLASHINFER_CACHE_VERSION}"; \
+    rm -rf /opt/wheels/flashinfer-cache
+
+# NemoLens 0.1.0 declares Python >=3.13 although its API works on this Python 3.12
+# image. Override metadata validation for this wheel only; dependencies are already
+# supplied by the base image and must not be resolved/downgraded here.
+ARG NEMO_LENS_VERSION=0.1.0
+RUN set -eux; \
+    source /opt/alps/package-helpers.sh; \
+    pip_install python3 --break-system-packages --no-cache-dir \
+      --ignore-requires-python --no-deps --only-binary :all: \
+      "nemo-lens[sdk]==${NEMO_LENS_VERSION}"; \
+    python3 - <<'VERIFY'
+import importlib.metadata as md
+import opentelemetry.exporter.otlp.proto.grpc.trace_exporter
+import opentelemetry.exporter.otlp.proto.http.trace_exporter
+import opentelemetry.sdk
+assert md.version("nemo-lens") == "0.1.0"
+assert md.metadata("nemo-lens")["Requires-Python"] == ">=3.13"
+assert md.version("opentelemetry-sdk") == "1.45.1"
+assert md.version("protobuf") == "6.33.6"
+VERIFY
+
+# ---- validated package additions --------------------------------------------
+# These exact direct pins were exercised together in an isolated overlay on the
+# CUDA 13.3 / Python 3.12 NGC image. Keep the NemoRun compatibility constraints
+# scoped to this addition set: its TorchX dependency requires the older urllib3.
+# If a future base's urllib3 constraints conflict, fail resolution instead of
+# silently overriding the base's dependency graph.
+COPY Alps-Images/apps/nemo-rl/sources/nemo-run-constraints.txt /opt/alps/nemo-run-constraints.txt
+COPY --from=hadamard-builder /opt/wheels/hadamard/ /opt/wheels/hadamard/
+RUN set -eux; \
+    source /opt/alps/package-helpers.sh; \
+    awk '!/^flashinfer-jit-cache==/ && !/^nemo-lens==/' \
+      /opt/alps/package-additions.in > /tmp/package-additions-normal.in; \
+    pip_install python3 --break-system-packages --no-cache-dir \
+      -c /opt/alps/base-pins.txt -c /tmp/vllm-runtime-constraints.txt \
+      -c /opt/alps/nemo-run-constraints.txt \
+      -r /tmp/package-additions-normal.in; \
+    pip_install python3 --break-system-packages --no-cache-dir \
+      --no-deps /opt/wheels/hadamard/fast_hadamard_transform-*.whl; \
+    rm -rf /opt/wheels/hadamard /tmp/vllm-runtime-constraints.txt /tmp/package-additions-normal.in
 
 # ---- runtime defaults -------------------------------------------------------
 # The point of this image is that every NeMo-RL dependency is already importable,
@@ -631,6 +728,10 @@ for pkg, prefix in PREFIXES.items():
     assert got.startswith(prefix), f"{pkg}: expected {prefix}*, got {got}"
 
 assert md.version("vllm") == "0.28.0+apertus2", md.version("vllm")
+assert md.version("flashinfer-jit-cache") == "0.6.16.post3"
+assert md.version("nemo-lens") == "0.1.0"
+assert md.version("opentelemetry-sdk") == "1.45.1"
+assert md.version("protobuf") == "6.33.6"
 print("torch stack unchanged:", pins)
 VERIFY
 
@@ -656,6 +757,9 @@ RUN set -eux; \
 # Tests shipped with the image. `a+rX` alone is not enough: capital X only adds the
 # bit where one already exists, so a 0644 checkout stays unrunnable.
 COPY Alps-Images/apps/nemo-rl/tests/ /opt/tests/nemo-rl/
+COPY Alps-Images/apps/nemo-rl/sources/mathdx-cufftdx-smoke.cu /opt/tests/nemo-rl/
 RUN set -eux; \
     chmod -R a+rX /opt/tests/nemo-rl; \
     find /opt/tests/nemo-rl -name '*.sh' -exec chmod a+rx {} +
+
+ENV LD_PRELOAD="/usr/local/lib/python3.12/dist-packages/torch_memory_saver_hook_mode_preload_cu13.abi3.so:${LD_PRELOAD}"
