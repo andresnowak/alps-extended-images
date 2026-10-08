@@ -211,6 +211,8 @@ ARG UV_PYTHON_DOWNLOADS=never
 ARG FLASHINFER_CACHE_REPO=https://github.com/flashinfer-ai/flashinfer.git
 ARG FLASHINFER_CACHE_REF=9dc1b2495b40314dec8a8cde8cd7faf5c5206702
 ARG FLASHINFER_CACHE_ARCH=9.0a
+ARG FLASHINFER_CACHE_MAX_JOBS=4
+ARG FLASHINFER_CACHE_NVCC_THREADS=1
 ARG FLASHINFER_CACHE_TVM_FFI_VERSION=0.1.11
 RUN set -eux; \
     source /opt/alps/package-helpers.sh; \
@@ -224,6 +226,7 @@ RUN set -eux; \
     mkdir -p /opt/wheels/flashinfer-cache; \
     cd /tmp/flashinfer/flashinfer-jit-cache; \
     FLASHINFER_CUDA_ARCH_LIST="${FLASHINFER_CACHE_ARCH}" CUDA_HOME=/usr/local/cuda \
+      MAX_JOBS="${FLASHINFER_CACHE_MAX_JOBS}" FLASHINFER_NVCC_THREADS="${FLASHINFER_CACHE_NVCC_THREADS}" \
       python3 -m pip wheel --no-cache-dir \
         --no-deps --no-build-isolation --wheel-dir /opt/wheels/flashinfer-cache .; \
     test "$(find /opt/wheels/flashinfer-cache -maxdepth 1 -name 'flashinfer_jit_cache-0.6.16.post3-*.whl' | wc -l)" -eq 1; \
