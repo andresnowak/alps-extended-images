@@ -4,6 +4,13 @@ NeMo-RL image for Megatron policy/generation and Apertus2 MoE kernels, with the
 Apertus2 vLLM fork available for vLLM generation. NeMo-RL, Megatron-Bridge and
 Megatron-LM remain external checkouts: bind-mount them and configure `PYTHONPATH`.
 
+## Example
+
+[`example/`](example/) contains a standalone Chonk GSM8K Slurm/Ray launcher.
+It uses Megatron training and vLLM generation with an HF model input. One shell
+launcher uses separate YAML and prompt files. See the example
+README for pinned sources, batch sizes and the unvalidated memory/refit limits.
+
 ## Build
 
 Use the repository's [manual-build workflow](../../../manual-build/README.md)
