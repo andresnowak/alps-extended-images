@@ -365,8 +365,9 @@ RUN set -eux; \
     rm -rf /tmp/DeepGEMM
 
 # ---- grouped_gemm (MoE, gradient-accumulation fusion) -----------------------
-ARG GROUPED_GEMM_REPO=https://github.com/FFGGSSJJ/grouped_gemm.git
-ARG GROUPED_GEMM_COMMIT=45118e547923803ed52f80f240cf974620c9bdc5
+# swiss-ai/grouped_gemm dev/grad_acc_fuse
+ARG GROUPED_GEMM_REPO=https://github.com/swiss-ai/grouped_gemm.git
+ARG GROUPED_GEMM_COMMIT=0df11163e7e25d03793a2bc61c0396a1fbc0a944
 RUN set -eux; \
     uv pip uninstall --system grouped_gemm nv-grouped-gemm; \
     mkdir -p /tmp/grouped_gemm; \
