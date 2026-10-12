@@ -8,6 +8,11 @@ The source pin is `swiss-ai/vllm@d4d41485a1cc1aee0d906d19f41523d2fdc67463`
 from `apertus2/main`, including packed-shard loading and per-channel decay fixes. UCCL is pinned to
 `andresnowak/uccl@0c166355310a04b2344ca0c5c0df818b04d26af0`.
 
+## Serving examples
+
+[Chonk and Megachonk examples](example/README.md) provide standalone `sbatch`
+Bash launchers using the pinned, tested image and `allgather_reducescatter`.
+
 ## Build and publish
 
 Open a PR, then comment:
