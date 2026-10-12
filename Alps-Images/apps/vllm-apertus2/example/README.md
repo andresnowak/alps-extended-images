@@ -71,21 +71,23 @@ use an authenticated SSH tunnel. Do not expose the API through a public proxy.
 
 ## Speed
 
-The table shows aggregate output tokens per second at 32 concurrent requests.
-Each request generates 128 tokens. Speed includes input processing and output
-generation; it is not decode-only speed.
+**All speeds below are tokens per second, per request—not totals across GPUs.**
+The tests used 32 concurrent requests. Each request generated 128 output tokens.
 
-| Model | GPUs | 128 input tokens | 32,512 input tokens | 65,280 input tokens |
+| Model | GPUs | Input tokens per request | Prefill estimate: input tokens/s per request | Decode: output tokens/s per request |
 | --- | --- | ---: | ---: | ---: |
-| Chonk | 16 | 1,364.2 | 157.8 | 27.8 |
-| Megachonk | 32 | 563.95 | 61.49 | Not tested |
+| Chonk | 16 | 32,512 | **1,957** | **14.2** |
+| Megachonk | 32 | 32,512 | **747** | **5.9** |
+| Chonk | 16 | 65,280 | **470** | **16.4** |
 
-The first two speed columns are medians from two October 10 runs.
-Those runs used a 32k server limit and a diagnostic NUMA guard.
-Chonk used loader concurrency 1. These scripts use native NUMA binding without
-that guard. The 64k Chonk value is from one October 12 run of the native example
-with loader concurrency 4. These measurements are not a controlled model
-comparison: the models use different GPU counts.
+- **Prefill estimate:** input tokens divided by median time to first token.
+  This includes scheduling and queue time; it is not pure GPU prefill speed.
+- **Decode speed:** 1,000 divided by median time per output token in milliseconds.
+  This measures output generation after the first token.
+
+The near-32k values use median timings from two October 10 runs with a
+NUMA guard. The near-64k values use one October 12 run with native NUMA binding.
+The models use different GPU counts.
 
 > **Chonk near-64k — 32 concurrent requests on 16 GPUs**
 >
