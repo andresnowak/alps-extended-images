@@ -1,74 +1,142 @@
-# Chonk GSM8K GRPO on Alps
+# Chonk GRPO on Alps
 
-Megatron trains and vLLM generates; Ray coordinates the 24-node run. The driver runs
-inside the Ray head's container so both share its local socket. Worker tasks
-stay alive until the driver finishes and return its exit status. Bash prepares
-job-local source copies. The GRPO YAML and prompt stay separate.
+Three standalone Slurm/Ray examples use Megatron training:
 
-From this directory:
+| Directory | Generation backend | Configuration |
+| --- | --- | --- |
+| [`vllm/`](vllm/) | vLLM, standard all-gather/reduce-scatter | `grpo-chonk-vllm.yaml` |
+| [`megatron/`](megatron/) | Megatron dynamic inference | `grpo-chonk-megatron.yaml` |
+| [`nemo-gym-vllm/`](nemo-gym-vllm/) | vLLM, remote NeMo Gym math verifier | `grpo-chonk.yaml` |
+
+The first two examples use GSM8K. The `nemo-gym-vllm/` example includes an
+OpenMathReasoning JSONL subset.
+
+Each GSM8K directory has its own Bash launcher, YAML and five-shot prompt.
+The examples share this README and [`environment.toml`](environment.toml).
+Neither GSM8K example needs files from the other backend directory.
+
+## Submit
+
+Choose a backend and submit from its directory:
 
 ```bash
+cd vllm
 sbatch train-gsm8k-chonk.sh
 ```
 
-The Slurm defaults use account `csstaff` and partition `normal`; override the
-account with `sbatch --account=YOUR_PROJECT train-gsm8k-chonk.sh` if needed.
-
-The script uses the included `environment.toml`, copied from your EDF. Set
-`NEMO_RL_ENVIRONMENT=/path/to/other.toml` to use another EDF. The read-only default model is
-`/capstor/store/cscs/swissai/infra01/apertus_checkpoints/v2/hf/chonk/pretraining/long_context/long-context-iter-0003576`.
-Sources default to the online Swiss-AI NeMo-RL, Megatron-Bridge, and Megatron-Core
-repositories. No pre-existing checkout or developer scratch folder is required.
-Each source also accepts a local Git checkout containing the pinned revision:
+Or:
 
 ```bash
-export NEMO_RL_SOURCE=https://github.com/swiss-ai/Nemo-RL.git
-export BRIDGE_SOURCE=https://github.com/swiss-ai/Megatron-Bridge.git
-export MEGATRON_SOURCE=https://github.com/swiss-ai/Megatron-LM-MoE.git
-# Or use local paths, for example:
-# export BRIDGE_SOURCE=$HOME/open_source/SwissAI-Megatron-Bridge
-# export MEGATRON_SOURCE=$HOME/open_source/Megatron-LM-MoE
+cd megatron
+sbatch train-gsm8k-chonk.sh
 ```
 
-The selected repositories must contain the revisions listed below.
-Override `HF_MODEL`, `MAX_NUM_STEPS`, `TRAIN_MICRO_BATCH`, `INFERENCE_REQUESTS`,
-`NUM_PROMPTS`, or `NRL_MEGATRON_CHECKPOINT_DIR`. The default is two updates with
-a two-hour time limit. Run data and logs go under
-`/iopsstor/scratch/cscs/$USER/tmp/nemo-rl-gsm8k-chonk/`; checkouts and model files
-are not changed. Slurm's startup log is
-`/iopsstor/scratch/cscs/$USER/tmp/gsm8k-chonk-JOBID.out`; that scratch `tmp`
-directory must exist before submission.
+The defaults are account `csstaff`, partition `normal`, 24 nodes, two updates
+and a two-hour limit. Use `sinfo -a` to check which partitions are available.
+Set `--partition` and other Slurm options for your account:
 
-Topology: 8 training nodes/32 GPUs (EP16), 16 inference nodes/64 GPUs (EP8).
-Defaults: microbatch 4/GPU, global batch 128, generation batch size 32,
-32 prompts × 8 generations, 2 steps. Both sides use PP1. Training uses the
-vLLM recipe's coarse-grained expert offloading: 8 chunks, 2 stages, in-place
-FP8 parameters and extra BF16 storage. vLLM uses BF16, TP1/PP1/EP8 with DP8,
-80% GPU memory utilization, dummy initial weights, and standard
-`allgather_reducescatter` communication (no DeepEP/UCCL).
-Generation is synchronous; CUDA graphs are allowed (`enforce_eager: false`),
-and multiprocessing uses `spawn`. Weights come from the policy via NeMo's
-NCCL collective and Bridge conversion; native MCore refit and M-to-N are not used.
+```bash
+sbatch --account=YOUR_PROJECT --time=02:00:00 train-gsm8k-chonk.sh
+```
 
-The vLLM configuration is based on job 5003401, which reached generation but
-timed out in Gloo DP communication. The communication backend is now standard
-all-gather/reduce-scatter instead of DeepEP/UCCL (for now as we need to fix a bug idx ranking in NemoRL). No complete GRPO update was
-confirmed; this backend change is not a validated fix for the Gloo timeout. Training microbatch remains 4
-(the historical run used 1). Saves are disabled.
+The driver runs in the Ray head's container. Worker tasks wait for the driver
+to finish. They return the driver's exit status.
 
-A small job-local overlay installs Lens and soundfile; compiler caches use
-node-local `/tmp`.
+## Shared configuration
 
-Sources:
-- [NeMo-RL](https://github.com/swiss-ai/Nemo-RL), [`f196ef0a`](https://github.com/swiss-ai/Nemo-RL/commit/f196ef0a1ccb54d6ce71cd63277fb6a0e01168db)
-- [Megatron-Core](https://github.com/swiss-ai/Megatron-LM-MoE), [PR #88](https://github.com/swiss-ai/Megatron-LM-MoE/pull/88), `a9e0c497`
-- [Megatron-Bridge](https://github.com/swiss-ai/Megatron-Bridge), [`f3bc8e7e`](https://github.com/swiss-ai/Megatron-Bridge/commit/f3bc8e7e6a722adde1176b2ba8980109e09493ef)
+- Training: 16 nodes / 64 GPUs, TP1/PP4/CP1/EP16, no virtual pipeline.
+  The four pipeline stages contain 8/12/12/10 layers.
+- Generation: 8 nodes / 32 GPUs, TP1/PP1/EP8. Generation uses separate nodes.
+- Training microbatch: 1/GPU; global batch: 128.
+- Training-worker allocator: `PYTORCH_ALLOC_CONF=expandable_segments:True`.
+  Generation workers do not inherit this setting.
+- Generation batch: 32; 32 prompts × 8 generations = 256 responses per update.
+- BF16 model parameters, FP32 training gradient buffers and synchronous GRPO.
+  The KL penalty is 0.01. Checkpoint saves are disabled. The DeepGEMM FP8
+  expert backward accumulation kernel needs FP32 gradient storage.
+- Training expert offloading: coarse-grained, 8 chunks, 2 stages, in-place FP8
+  parameters and extra parameter storage.
+- Training dispatcher: `flex` with the image's UCCL-backed `deepep` interface.
+  Token dispatch uses BF16. The examples disable expert-communication overlap
+  and delayed weight-gradient computation. UCCL settings match
+  [`pretrain/chonk.sh`](https://github.com/swiss-ai/pretrain/blob/6cb927e8b153e2fe9cd660fe0a6332c2ee7ce2a2/apertus-2/pretraining/chonk/chonk.sh):
+  - `UCCL_EP_TRANSPORT=cxi`
+  - `UCCL_EP_DISPATCH_CONFIG=24,40,512,32,512`
+  - `UCCL_EP_COMBINE_CONFIG=24,7,512,32,512`
+  - `UCCL_EP_CPU_TIMEOUT_SECS=6000`
+  - `CUDA_DEVICE_MAX_CONNECTIONS=1`
+  These settings apply to training workers only. Generation keeps its existing
+  dispatcher.
+- Weight refit: ordinary NeMo packed NCCL with Bridge conversion for all examples.
 
-The launcher applies NeMo's [no-grad PR #5](https://github.com/swiss-ai/Nemo-RL/pull/5),
-[tokenizer PR #1](https://github.com/swiss-ai/Nemo-RL/pull/1), and the full upstream
-[vLLM DP PR #2517](https://github.com/NVIDIA-NeMo/RL/pull/2517) in its job-local
-checkout. Conflicting PR2517 hunks use the upstream multiprocessing executor;
-the fork's larger nightly-test budget is retained. Bridge applies its
-[offloading-expert conversion PR #4](https://github.com/swiss-ai/Megatron-Bridge/pull/4)
-in a separate job-local checkout. Source revisions and result trees are recorded;
-there are no bundled patches or Python launcher helpers.
+The default read-only HF model is:
+
+```text
+/capstor/store/cscs/swissai/infra01/apertus_checkpoints/v2/hf/chonk/pretraining/long_context/long-context-iter-0003576
+```
+
+The launchers use the shared `../environment.toml`. Set
+`NEMO_RL_ENVIRONMENT=/path/to/other.toml` to use another EDF. Set
+`HF_MODEL`, `MAX_NUM_STEPS`, `TRAIN_MICRO_BATCH`, `INFERENCE_REQUESTS`,
+`NUM_PROMPTS` or `NRL_MEGATRON_CHECKPOINT_DIR` in the submission environment
+to change these defaults.
+
+The default vLLM run directory is
+`/iopsstor/scratch/cscs/$USER/tmp/nemo-rl-gsm8k-chonk/`.
+Megatron uses `nemo-rl-gsm8k-chonk-megatron/` in the same scratch `tmp` directory.
+Set `CHONK_RUN_ROOT` to use another run directory.
+
+Slurm writes startup logs to `gsm8k-chonk-JOBID.out` or
+`gsm8k-chonk-megatron-JOBID.out` in that scratch `tmp` directory.
+Create this directory before submission. The launchers do not change the
+original checkouts or model files.
+
+The launcher and EDF set the cache locations. Bridge config locks use
+`/tmp/chonk-caches-JOBID/megatron-config-locks` by default.
+Set `MEGATRON_CONFIG_LOCK_DIR` to use another location.
+
+## Generation backends
+
+### vLLM
+
+The vLLM examples use an asynchronous engine with DP8/EP8 cohorts and BF16.
+They use 80% GPU memory, a maximum model length of 1280 and dummy initial weights.
+Communication uses `allgather_reducescatter`, not DeepEP/UCCL.
+GRPO updates stay synchronous. Asynchronous generation does not enable
+asynchronous GRPO. CUDA graphs are allowed (`enforce_eager: false`).
+Multiprocessing uses `spawn`.
+
+### Megatron
+
+The Megatron example uses native dynamic inference with local, layer-scope
+CUDA graphs and MoE padding. With the current EP8/NCCL dispatcher, decode uses
+CUDA graphs. Prefill runs without CUDA graphs.
+
+## Validation
+
+- Megatron: the native configuration completed two GRPO updates (job 5039868).
+- vLLM: async generation and packed NCCL refit completed two GRPO updates
+  (job 5045801).
+- NeMo Gym vLLM: remote math verification and packed NCCL refit completed two
+  GRPO updates (job 5046558); see its [validation notes](nemo-gym-vllm/README.md).
+
+These are operational smoke tests, not model-quality or numerical-parity checks.
+
+## Sources
+
+The launchers define repository URLs, commit pins and PR refs. Use the launcher
+as the source of truth for versions:
+
+- [vLLM launcher](vllm/train-gsm8k-chonk.sh)
+- [Megatron launcher](megatron/train-gsm8k-chonk.sh)
+- [NeMo Gym launcher](nemo-gym-vllm/train-chonk.sh)
+
+Each launcher downloads public repositories into the job's run directory.
+It records the fetched revisions in `applied-prs.txt` and the source trees in
+`source-provenance.txt`. Check these files to identify the code used by a run.
+No developer checkout, bundled patch or Python launcher helper is needed.
+
+The launchers install Lens and soundfile in a job-local package directory.
+The Gym example also installs the packages in `gym-client-requirements.txt`.
+Set `NEMO_RL_SOURCE`, `BRIDGE_SOURCE` or `MEGATRON_SOURCE` to use compatible Git
+URLs or local checkouts. These checkouts must contain the required revisions.

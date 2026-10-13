@@ -1,4 +1,3 @@
-# Self-contained overlay; the pinned NeMo source supplies the complete schema.
 defaults:
   - ${oc.env:NEMO_RL_PATH}/examples/configs/grpo_math_1B_megatron.yaml
 
@@ -6,7 +5,7 @@ cluster:
   num_nodes: ${oc.decode:${oc.env:TOTAL_NODES}}
   gpus_per_node: 4
 
-# Synchronous GRPO with Megatron training and vLLM generation.
+# Synchronous GRPO with Megatron training and asynchronous vLLM generation.
 grpo:
   async_grpo:
     enabled: false
@@ -48,7 +47,9 @@ policy:
   megatron_cfg:
     enabled: true
     tensor_model_parallel_size: 1
-    pipeline_model_parallel_size: 1
+    pipeline_model_parallel_size: 4
+    num_layers_in_first_pipeline_stage: 8
+    num_layers_in_last_pipeline_stage: 10
     expert_model_parallel_size: 16
     expert_tensor_parallel_size: 1
     context_parallel_size: 1
@@ -61,14 +62,27 @@ policy:
     moe_router_quantile_balancing_freeze: true
     moe_router_dtype: fp32
     moe_router_bias_update_rate: 0.0
-    moe_token_dispatcher_type: alltoall
+    moe_token_dispatcher_type: flex
+    moe_flex_dispatcher_backend: deepep
+    moe_enable_deepep: true
     moe_permute_fusion: true
     apply_rope_fusion: false
-    # Match the vLLM recipe's training experts; export logical BF16 for refit.
+    # UCCL settings from pretrain/chonk.sh; model weights stay BF16.
     env_vars:
+      PYTORCH_ALLOC_CONF: "expandable_segments:True"
+      CUDA_DEVICE_MAX_CONNECTIONS: "1"
+      UCCL_EP_TRANSPORT: "cxi"
+      UCCL_EP_DISPATCH_CONFIG: "24,40,512,32,512"
+      UCCL_EP_COMBINE_CONFIG: "24,7,512,32,512"
+      UCCL_EP_CPU_TIMEOUT_SECS: "6000"
       NRL_REFIT_BUFFER_MEMORY_RATIO: "0.005"
       NRL_REFIT_NUM_BUFFERS: "1"
     model_overrides:
+      pipeline_model_parallel_layout: null
+      virtual_pipeline_model_parallel_size: null
+      overlap_moe_expert_parallel_comm: false
+      delay_wgrad_compute: false
+      moe_use_fp8_dispatch: false
       moe_use_offloading_experts: true
       moe_offloading_mode: coarse-grained
       moe_offloading_num_chunks: 8
@@ -123,11 +137,11 @@ policy:
       end_weight_decay: 0.0
       weight_decay_incr_style: constant
     distributed_data_parallel_config:
-      grad_reduce_in_fp32: false
+      # DeepGEMM FP8 expert wgrad accumulation requires FP32 gradient storage.
+      grad_reduce_in_fp32: true
       overlap_grad_reduce: true
       overlap_param_gather: false
       use_custom_fsdp: false
-      data_parallel_sharding_strategy: optim_grads_params
   generation:
     backend: vllm
     temperature: 1.0
@@ -142,7 +156,7 @@ policy:
         gpus_per_node: 4
     refit_transport: null
     vllm_cfg:
-      async_engine: false
+      async_engine: true
       precision: ${policy.precision}
       tensor_parallel_size: 1
       pipeline_parallel_size: 1

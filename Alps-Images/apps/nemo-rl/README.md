@@ -1,43 +1,46 @@
 # `nemo-rl` container image
 
-NeMo-RL image for Megatron policy/generation and Apertus2 MoE kernels, with the
-Apertus2 vLLM fork available for vLLM generation. NeMo-RL, Megatron-Bridge and
-Megatron-LM remain external checkouts: bind-mount them and configure `PYTHONPATH`.
+This image supports Megatron training and generation with Apertus2 MoE kernels.
+It also includes the Apertus2 vLLM fork for generation. Keep NeMo-RL,
+Megatron-Bridge and Megatron-LM in external checkouts. Bind-mount these checkouts
+and set `PYTHONPATH`.
 
-## Example
+## Examples
 
-[`example/`](example/) contains a standalone Chonk GSM8K Slurm/Ray launcher.
-It uses Megatron training and vLLM generation with an HF model input. One shell
-launcher uses separate YAML and prompt files. See the example
-README for pinned sources, batch sizes and the unvalidated memory/refit limits.
+See [`example/`](example/README.md) for the Chonk Slurm/Ray launchers.
+[`example/vllm/`](example/vllm/) uses vLLM generation.
+[`example/megatron/`](example/megatron/) uses Megatron generation.
+Both use Megatron training, an HF model and GSM8K data. Each has its own Bash,
+YAML and prompt files. They share one EDF and a README with source pins,
+batch sizes and test limits.
+
+[`example/nemo-gym-vllm/`](example/nemo-gym-vllm/) uses a remote NeMo Gym math
+verifier instead of the GSM8K environment.
 
 ## Build
 
-Use the repository's [manual-build workflow](../../../manual-build/README.md)
-from the repository root to resolve the canonical base image.
+Run the [manual-build workflow](../../../manual-build/README.md) from the
+repository root. This workflow selects the canonical base image.
 
 ## Runtime and additions
 
-The image installs runtime dependencies against the base image's Torch, Triton
-and NumPy pins. NeMo Gym server venvs are still built at runtime. Package pins are
-in [`sources/package-additions.in`](sources/package-additions.in), with Hadamard
-pinned separately in the Containerfile. Hadamard is built from upstream source;
-the source-built FlashInfer JIT cache targets SM90a.
+The image uses the base image's Torch, Triton and NumPy pins for runtime packages.
+It creates NeMo Gym server venvs at runtime. See
+[`sources/package-additions.in`](sources/package-additions.in) for package pins.
 
-NemoLens 0.1.0 declares Python `>=3.13`; its wheel is installed on this Python
-3.12 image with a metadata override for that wheel only. Its SDK/exporter
-requirements use the base OpenTelemetry 1.45.1 / protobuf 6.33.6 stack.
+NemoLens 0.1.0 requires Python `>=3.13` in its package metadata. This Python 3.12
+image overrides that metadata for the NemoLens wheel only. The SDK and exporter
+use the base OpenTelemetry 1.45.1 and protobuf 6.33.6 packages.
 
-TorchMemorySaver's CUDA 13 hook is preloaded by default. Applications still use
-its region/pause/resume API; set `LD_PRELOAD=` to disable the hook. NemoRun's
-compatibility constraints are in [`sources/nemo-run-constraints.txt`](sources/nemo-run-constraints.txt).
-FlashMLA, Diffusers and qwen-vl-utils are excluded.
+The image preloads TorchMemorySaver's CUDA 13 hook. Applications still use its
+region/pause/resume API. Set `LD_PRELOAD=` to disable the hook.
+See [`sources/nemo-run-constraints.txt`](sources/nemo-run-constraints.txt) for
+NemoRun compatibility constraints. The image does not include FlashMLA,
+Diffusers or qwen-vl-utils.
 
 ## Smoke-test scope
 
-`/opt/tests/nemo-rl/import-smoke.sh` runs GPU imports and focused package tests.
-The FlashInfer check exercises the cached SM90a FP16 `silu_and_mul` kernel;
-NemoLens exports a trace to an in-memory exporter without network access. MathDx
-coverage is cuFFTDx only; cuBLASDx and cuSolverDx are not covered. The existing
-Megatron-only pins were training-tested on 8 GH200 GPUs; the updated image has
-not been built or training-tested.
+`/opt/tests/nemo-rl/import-smoke.sh` checks GPU imports and selected packages.
+The FlashInfer test runs the cached SM90a FP16 `silu_and_mul` kernel.
+The NemoLens test exports a trace in memory. It does not use the network.
+The MathDx test covers cuFFTDx only. It does not cover cuBLASDx or cuSolverDx.
