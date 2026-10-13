@@ -21,7 +21,7 @@ RUN_ROOT="${CHONK_RUN_ROOT:-/iopsstor/scratch/cscs/$USER/tmp/nemo-rl-gsm8k-chonk
 NEMO_REF=f196ef0a1ccb54d6ce71cd63277fb6a0e01168db
 NEMO_FP8_REF=19843e5a523254ebf3bed49a47a1e852dca29a70
 MCORE_REF=0536034901962160aac9742d134a84c55e28d224
-BRIDGE_REF=f3bc8e7e6a722adde1176b2ba8980109e09493ef
+BRIDGE_REF=077224531ad4d6d0caef767a84e619b256aa5cb6
 
 usage() {
     printf '%s\n' \
@@ -89,7 +89,7 @@ if [[ "${1:-}" != server && "${1:-}" != driver ]]; then
 
     git clone --no-checkout "$BRIDGE_SOURCE" "$RUN_DIR/sources/bridge"
     git -C "$RUN_DIR/sources/bridge" checkout --detach "$BRIDGE_REF"
-    git -C "$RUN_DIR/sources/bridge" fetch https://github.com/swiss-ai/Megatron-Bridge.git pull/4/head
+    git -C "$RUN_DIR/sources/bridge" fetch https://github.com/swiss-ai/Megatron-Bridge.git pull/5/head
     git -C "$RUN_DIR/sources/bridge" merge --ff-only FETCH_HEAD
 
     {
@@ -97,7 +97,7 @@ if [[ "${1:-}" != server && "${1:-}" != driver ]]; then
         cat "$RUN_DIR/applied-prs.txt"
         printf 'NeMo result tree '
         git -C "$RUN_DIR/sources/nemo-rl" rev-parse 'HEAD^{tree}'
-        printf 'Bridge PR #4 '
+        printf 'Bridge PR #5 '
         git -C "$RUN_DIR/sources/bridge" rev-parse HEAD
     } > "$RUN_DIR/source-provenance.txt"
 
