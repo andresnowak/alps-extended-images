@@ -41,16 +41,35 @@ The launcher loads `math-chat-template.jinja` for policy tokenization and HTTP
 serving. The template asks for a short solution and a boxed final answer.
 The verifier uses math verification, not an LLM judge.
 
-To use another Gym-format dataset:
+## Environment overrides
+
+Set `MAX_NUM_STEPS` to change the maximum number of GRPO iterations
+(default: `2`). For example:
+
+```bash
+MAX_NUM_STEPS=10 \
+sbatch --time=04:00:00 train-chonk.sh
+```
+
+See the [shared override table](../README.md#environment-overrides) for model,
+batch, container and output settings. This example also accepts:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `GYM_MATH_URL` | Math verifier URL shown above | Remote math resources server. |
+| `GYM_TRAIN_DATA` | `$EXAMPLE_DIR/math-smoke.jsonl` | Gym-format training dataset. |
+| `NEMO_GYM_SOURCE` | `https://github.com/swiss-ai/nemo-gym.git` | Gym Git URL or local checkout. |
+| `NEMO_GYM_REF` | Pinned revision in the launcher | Gym revision. Use matching client dependencies. |
+
+To use another dataset:
 
 ```bash
 GYM_TRAIN_DATA=/path/to/train.jsonl sbatch train-chonk.sh
 ```
 
-Set `GYM_MATH_URL` to use another compatible verifier.
-Set `NEMO_RL_ENVIRONMENT` to use another container environment.
-Set `CHONK_RUN_ROOT` to change the default output directory:
+Set `CHONK_RUN_ROOT` to change the default artifact directory:
 `/iopsstor/scratch/cscs/$USER/tmp/nemo-rl-nemo-gym-chonk/`.
+Slurm's `--output` option selects the log file.
 
 ## Check verifier access
 

@@ -42,6 +42,41 @@ sbatch --account=YOUR_PROJECT --time=02:00:00 train-gsm8k-chonk.sh
 The driver runs in the Ray head's container. Worker tasks wait for the driver
 to finish. They return the driver's exit status.
 
+## Environment overrides
+
+Set these variables before submission. They apply to all three examples.
+For example, from a GSM8K example directory:
+
+```bash
+MAX_NUM_STEPS=10 \
+sbatch --time=04:00:00 train-gsm8k-chonk.sh
+```
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `MAX_NUM_STEPS` | `2` | Maximum GRPO iterations. The YAML epoch limit also applies. |
+| `NUM_PROMPTS` | `32` | Prompts per GRPO iteration. Each Prompt produces 8 responses. |
+| `TRAIN_MICRO_BATCH` | `1` | Training microbatch size per GPU. |
+| `INFERENCE_REQUESTS` | `32` | Generation batch size; also the native Megatron request limit. |
+| `HF_MODEL` | Chonk path shown below | Read-only Hugging Face model directory. |
+| `NEMO_RL_ENVIRONMENT` | `../environment.toml` | Container environment file, relative to the example directory by default. |
+| `CHONK_RUN_ROOT` | Backend-specific scratch directory shown below | Directory for job artifacts and source checkouts. |
+| `NRL_MEGATRON_CHECKPOINT_DIR` | `$RUN_DIR/hf-import` | HF-to-Megatron conversion directory. Reuse only a compatible conversion. |
+| `MEGATRON_CONFIG_LOCK_DIR` | `/tmp/chonk-caches-JOBID/megatron-config-locks` | Directory for Bridge config locks. |
+| `RAY_PORT` | `6379` | Ray head port. |
+| `NEMO_RL_SOURCE`, `BRIDGE_SOURCE`, `MEGATRON_SOURCE` | Swiss AI repository URLs in the launcher | Git URLs or local checkouts that contain the required revisions. |
+| `EXAMPLE_DIR` | Submission directory, or script directory outside Slurm | Example files to use. Set this if you submit from another directory. |
+
+Batch sizes must satisfy both rules:
+
+- `128` must be divisible by `16 * TRAIN_MICRO_BATCH`.
+- `NUM_PROMPTS * 8` must be divisible by `128`.
+
+The launchers fix the node split at 16 training nodes and 8 generation nodes.
+The training global batch is fixed at 128. These are not environment overrides.
+Use Slurm options such as `--account`, `--partition`, `--time` and `--output`
+for scheduling and log settings.
+
 ## Shared configuration
 
 - Training: 16 nodes / 64 GPUs, TP1/PP4/CP1/EP16, no virtual pipeline.
@@ -75,24 +110,26 @@ The default read-only HF model is:
 /capstor/store/cscs/swissai/infra01/apertus_checkpoints/v2/hf/chonk/pretraining/long_context/long-context-iter-0003576
 ```
 
-The launchers use the shared `../environment.toml`. Set
-`NEMO_RL_ENVIRONMENT=/path/to/other.toml` to use another EDF. Set
-`HF_MODEL`, `MAX_NUM_STEPS`, `TRAIN_MICRO_BATCH`, `INFERENCE_REQUESTS`,
-`NUM_PROMPTS` or `NRL_MEGATRON_CHECKPOINT_DIR` in the submission environment
-to change these defaults.
-
 The default vLLM run directory is
 `/iopsstor/scratch/cscs/$USER/tmp/nemo-rl-gsm8k-chonk/`.
 Megatron uses `nemo-rl-gsm8k-chonk-megatron/` in the same scratch `tmp` directory.
 Set `CHONK_RUN_ROOT` to use another run directory.
 
-Slurm writes startup logs to `gsm8k-chonk-JOBID.out` or
+Slurm writes logs to `gsm8k-chonk-JOBID.out` or
 `gsm8k-chonk-megatron-JOBID.out` in that scratch `tmp` directory.
 Create this directory before submission. The launchers do not change the
 original checkouts or model files.
 
-The launcher and EDF set the cache locations. Bridge config locks use
-`/tmp/chonk-caches-JOBID/megatron-config-locks` by default.
+The launcher and EDF set the cache locations.
+
+Bridge config locks are small lock files used when Megatron-Bridge loads a
+Hugging Face model configuration, such as `config.json`. Processes that share
+the lock directory take turns loading the same model's config. This prevents
+races when they download or cache it. These files contain no model weights
+and are not checkpoints.
+
+The default directory is `/tmp/chonk-caches-JOBID/megatron-config-locks`.
+It is node-local, so it does not coordinate processes on different nodes.
 Set `MEGATRON_CONFIG_LOCK_DIR` to use another location.
 
 ## Generation backends

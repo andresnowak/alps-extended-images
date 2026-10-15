@@ -56,7 +56,6 @@ MEGATRON_PATH="/tmp/chonk-mcore-$SLURM_JOB_ID"
 
 if [[ "${1:-}" != server && "${1:-}" != driver ]]; then
     mkdir -p "$RUN_DIR"
-    exec > "$RUN_ROOT/slurm-$SLURM_JOB_ID.out" 2>&1
     [[ ! -e "$RUN_DIR/sources" ]] || { echo "Refusing to overwrite snapshots: $RUN_DIR/sources" >&2; exit 1; }
     mkdir -p "$RUN_DIR/sources/megatron"
 
@@ -150,6 +149,8 @@ if [[ "${1:-}" == server || "${1:-}" == driver ]]; then
     export PYTHONPATH="$RUN_DIR/dependencies:$NEMO_RL_PATH:$MEGATRON_BRIDGE_PATH:$MEGATRON_PATH:$EXAMPLE_DIR"
 fi
 
+# Internal server mode: srun starts one Ray server per node.
+# Rank 0 is the head and starts the driver; the other ranks are Ray workers.
 if [[ "${1:-}" == server ]]; then
     node_ip="$(hostname -I | awk '{print $1}')"
     [[ -n "$node_ip" ]] || { echo 'Cannot determine node IP.' >&2; exit 1; }
@@ -192,6 +193,8 @@ if [[ "${1:-}" == server ]]; then
     exit "$driver_status"
 fi
 
+# Internal driver mode: run GRPO in the head's container to share its Ray socket.
+# Wait for all nodes and GPUs before starting GRPO.
 if [[ "${1:-}" == driver ]]; then
     deadline=$((SECONDS + 900))
     ready=0
