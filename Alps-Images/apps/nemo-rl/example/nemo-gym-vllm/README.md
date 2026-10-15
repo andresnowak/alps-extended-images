@@ -32,6 +32,7 @@ It keeps the image's Torch, Ray and OpenAI versions unchanged.
 The launcher automatically prepares the full training and validation splits of
 NVIDIA's [Nemotron-RL-math-OpenMathReasoning dataset](https://huggingface.co/datasets/nvidia/Nemotron-RL-math-OpenMathReasoning/tree/219bf0170cd87cd5db2bbf33715ce9ea43a2c59c),
 under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+The pinned splits contain 112,867 training tasks and 30 validation tasks.
 These are RL tasks with prompts and reference answers, not the original
 OpenMathReasoning reasoning-trace corpus.
 
@@ -62,7 +63,9 @@ sbatch --time=04:00:00 train-chonk.sh
 ```
 
 See the [shared override table](../README.md#environment-overrides) for model,
-batch, container and output settings. This example also accepts:
+batch, container and output settings. For optional W&B logging, put project,
+entity, group and credentials in the shared `../.env`; see
+[W&B setup](../README.md#optional-wb-logging). This example also accepts:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |

@@ -8,8 +8,9 @@ Three standalone Slurm/Ray examples use Megatron training:
 | [`megatron/`](megatron/) | Megatron dynamic inference | `grpo-chonk-megatron.yaml` |
 | [`nemo-gym-vllm/`](nemo-gym-vllm/) | vLLM, remote NeMo Gym math verifier | `grpo-chonk.yaml` |
 
-The first two examples use GSM8K. The `nemo-gym-vllm/` example includes an
-OpenMathReasoning JSONL subset.
+The first two examples use GSM8K. The `nemo-gym-vllm/` example prepares the full
+OpenMathReasoning RL training and validation splits. It also includes an optional
+500-task smoke input.
 
 Each GSM8K directory has its own Bash launcher, YAML and five-shot prompt.
 The examples share this README and [`environment.toml`](environment.toml).
@@ -36,7 +37,7 @@ and a two-hour limit. Use `sinfo -a` to check which partitions are available.
 Set `--partition` and other Slurm options for your account:
 
 ```bash
-sbatch --account=YOUR_PROJECT --time=02:00:00 train-gsm8k-chonk.sh
+sbatch --account=YOUR_PROJECT --partition=preemptable --time=02:00:00 train-gsm8k-chonk.sh
 ```
 
 The driver runs in the Ray head's container. Worker tasks wait for the driver
@@ -76,6 +77,43 @@ The launchers fix the node split at 16 training nodes and 8 generation nodes.
 The training global batch is fixed at 128. These are not environment overrides.
 Use Slurm options such as `--account`, `--partition`, `--time` and `--output`
 for scheduling and log settings.
+
+## Optional W&B logging
+
+W&B is disabled by default. All three launchers load an optional `.env` file
+beside this README and `environment.toml`. From this README's directory, create
+it without replacing an existing file:
+
+```bash
+cp -n .env.example .env
+chmod 600 .env
+```
+
+Edit `.env` before submitting. Set `WANDB_ENABLED=true` and supply your settings:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `WANDB_ENABLED` | `false` | Enable W&B logging. |
+| `WANDB_PROJECT` | `chonk-grpo` | Project that contains the runs. |
+| `WANDB_ENTITY` | W&B account default | User or team namespace. |
+| `WANDB_RUN_GROUP` | Unset | Group related runs within a project. |
+| `WANDB_NAME` | `chonk-JOBID` | Run display name. W&B creates a unique run ID separately. |
+| `WANDB_API_KEY` | Unset | Credentials for online logging. Keep the real key private. |
+| `WANDB_MODE` | `online` when enabled | Set `offline` to save locally without contacting W&B. |
+
+Use shell-compatible `KEY=value` assignments. Quote values that contain spaces.
+The launchers source this file, so use only a trusted file. Its values override
+existing environment variables with the same names. The real `.env` is
+Git-ignored; do not put credentials in YAML or commit them.
+
+Run files go under the job's `nemo-rl-logs/` directory. The shared EDF defaults
+`WANDB_CACHE_DIR` to `/ritom/scratch/cscs/${USER}/cache/wandb` so jobs can reuse
+artifact-cache files. Shell startup settings can override this default.
+Set a shared cache path in any custom EDF too.
+
+Config, upload staging and downloaded-artifact directories stay in job scratch.
+Override those paths with `WANDB_CONFIG_DIR`, `WANDB_DATA_DIR` and
+`WANDB_ARTIFACT_DIR` if needed. Keep them outside `$HOME`.
 
 ## Shared configuration
 
@@ -118,8 +156,9 @@ Set `CHONK_RUN_ROOT` to use another run directory.
 
 Slurm writes logs to `gsm8k-chonk-JOBID.out` or
 `gsm8k-chonk-megatron-JOBID.out` in that scratch `tmp` directory.
-Create this directory before submission. The launchers do not change the
-original checkouts or model files.
+Create this directory before submission. By default, Slurm merges stdout and
+stderr into that file. Use `--error` to select a separate stderr file.
+The launchers do not change the original checkouts or model files.
 
 The launcher and EDF set the cache locations.
 
@@ -152,7 +191,8 @@ CUDA graphs. Prefill runs without CUDA graphs.
 
 ## Validation
 
-- Megatron: the native configuration completed two GRPO updates (job 5039868).
+- Megatron: native generation and training completed two GRPO updates
+  (job 5039868).
 - vLLM: async generation and packed NCCL refit completed two GRPO updates
   (job 5045801).
 - NeMo Gym vLLM: remote math verification and packed NCCL refit completed two

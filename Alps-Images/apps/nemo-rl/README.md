@@ -11,8 +11,8 @@ See [`example/`](example/README.md) for the Chonk Slurm/Ray launchers.
 [`example/vllm/`](example/vllm/) uses vLLM generation.
 [`example/megatron/`](example/megatron/) uses Megatron generation.
 Both use Megatron training, an HF model and GSM8K data. Each has its own Bash,
-YAML and prompt files. They share one EDF and a README with source pins,
-batch sizes and test limits.
+YAML and prompt files. They share one EDF and a README with batch sizes and
+test limits. The launchers define the source pins.
 
 [`example/nemo-gym-vllm/`](example/nemo-gym-vllm/) uses a remote NeMo Gym math
 verifier instead of the GSM8K environment.

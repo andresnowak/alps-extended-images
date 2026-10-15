@@ -12,6 +12,16 @@
 set -Eeuo pipefail
 
 EXAMPLE_DIR="${EXAMPLE_DIR:-${SLURM_SUBMIT_DIR:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)}}"
+# Shared .env overrides include W&B project/entity/group and credentials.
+# Export at submission/batch startup, not in Ray child modes.
+if [[ "${1:-}" != server && "${1:-}" != driver && -f "$EXAMPLE_DIR/../.env" ]]; then
+    set -a
+    # shellcheck source=/dev/null
+    source "$EXAMPLE_DIR/../.env"
+    set +a
+fi
+
+# User overrides: source repositories, model, container and run directory.
 NEMO_RL_SOURCE="${NEMO_RL_SOURCE:-https://github.com/swiss-ai/Nemo-RL.git}"
 NEMO_GYM_SOURCE="${NEMO_GYM_SOURCE:-https://github.com/swiss-ai/nemo-gym.git}"
 NEMO_GYM_REF="${NEMO_GYM_REF:-93f232f02074deda2fec13a6848f22e5dca741f5}"
@@ -20,6 +30,8 @@ MEGATRON_SOURCE="${MEGATRON_SOURCE:-https://github.com/swiss-ai/Megatron-LM-MoE.
 HF_MODEL="${HF_MODEL:-/capstor/store/cscs/swissai/infra01/apertus_checkpoints/v2/hf/chonk/pretraining/long_context/long-context-iter-0003576}"
 ENV_FILE="${NEMO_RL_ENVIRONMENT:-$EXAMPLE_DIR/../environment.toml}"
 RUN_ROOT="${CHONK_RUN_ROOT:-/iopsstor/scratch/cscs/$USER/tmp/nemo-rl-nemo-gym-chonk}"
+
+# Source pins, not environment overrides.
 NEMO_REF=f196ef0a1ccb54d6ce71cd63277fb6a0e01168db
 NEMO_FP8_REF=19843e5a523254ebf3bed49a47a1e852dca29a70
 MCORE_REF=0536034901962160aac9742d134a84c55e28d224
@@ -133,6 +145,7 @@ if [[ "${1:-}" != server && "${1:-}" != driver ]]; then
     TRAIN_NODES=16
     INFERENCE_NODES=8
     TOTAL_NODES=24
+    # Batch size and iteration overrides.
     TRAIN_MICRO_BATCH="${TRAIN_MICRO_BATCH:-1}"
     INFERENCE_REQUESTS="${INFERENCE_REQUESTS:-32}"
     MAX_NUM_STEPS="${MAX_NUM_STEPS:-2}"
@@ -154,6 +167,11 @@ if [[ "${1:-}" != server && "${1:-}" != driver ]]; then
     NRL_MEGATRON_CHECKPOINT_DIR="${NRL_MEGATRON_CHECKPOINT_DIR:-$RUN_DIR/hf-import}"
 
     export RUN_DIR EXAMPLE_DIR HF_MODEL
+    # W&B job-local paths. The shared artifact cache is set in environment.toml.
+    export WANDB_CONFIG_DIR="${WANDB_CONFIG_DIR:-$RUN_DIR/wandb/config}"
+    export WANDB_DATA_DIR="${WANDB_DATA_DIR:-$RUN_DIR/wandb/data}"
+    export WANDB_ARTIFACT_DIR="${WANDB_ARTIFACT_DIR:-$RUN_DIR/wandb/artifacts}"
+    # Gym endpoint and dataset overrides; the template is loaded from this example.
     export GYM_MATH_URL="${GYM_MATH_URL:-https://gym-dev.swissai.svc.cscs.ch/math_with_judge}"
     export GYM_TRAIN_DATA="${GYM_TRAIN_DATA:-$RUN_DIR/data/openmathreasoning-train.jsonl}"
     export GYM_VAL_DATA="${GYM_VAL_DATA:-$RUN_DIR/data/openmathreasoning-validation.jsonl}"

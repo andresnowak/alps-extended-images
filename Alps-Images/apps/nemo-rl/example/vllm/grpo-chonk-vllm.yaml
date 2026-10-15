@@ -194,6 +194,9 @@ loss_fn:
 
 logger:
   log_dir: ${oc.env:RUN_DIR}/nemo-rl-logs
-  wandb_enabled: false
+  wandb_enabled: ${oc.decode:${oc.env:WANDB_ENABLED,false}}
+  wandb:
+    project: ${oc.env:WANDB_PROJECT,chonk-grpo}
+    name: ${oc.env:WANDB_NAME,chonk-${oc.env:SLURM_JOB_ID,local}}
   tensorboard_enabled: false
   num_val_samples_to_print: 8
