@@ -30,7 +30,13 @@ RUN set -eux; \
     apt_get install -y --no-install-recommends \
       build-essential ca-certificates cmake git libibverbs-dev \
       libnuma-dev ninja-build pkg-config python3-dev; \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/*; \
+    # The base can lack this linker symlink despite libibverbs-dev being installed.
+    libdir="/usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)"; \
+    if [[ ! -e "${libdir}/libibverbs.so" && -e "${libdir}/libibverbs.so.1" ]]; then \
+        ln -sfn libibverbs.so.1 "${libdir}/libibverbs.so"; \
+    fi; \
+    test -e "${libdir}/libibverbs.so"
 
 # Keep the NGC Torch/CUDA ABI. Replace its TE pin deliberately, not its Torch,
 # Triton or NumPy. PIP_CONSTRAINT from the base may still require the old TE.
