@@ -29,7 +29,7 @@ constraints. Source pins and base constraints are stored in
 The SwissAI 0.5.2 FLA fork adds per-channel `A_log` support for KDA decay gates.
 
 UCCL is built for SM90, four NVLink peers per node and libfabric CXI.
-The container TOMLs set `UCCL_EP_TRANSPORT=cxi` at runtime.
+The runtime environment must set `UCCL_EP_TRANSPORT=cxi`.
 
 ### Emerging-Optimizers fork
 
@@ -64,18 +64,6 @@ bash "$BUILD_DIR/build.sh"
 The build requires an aarch64 GH200 compute node with Podman. The generated
 script selects the canonical, content-addressed base image.
 See the [manual build guide](../../../manual-build/README.md).
-
-## Environment definitions (EDF)
-
-| Environment | TOML |
-| --- | --- |
-| Chonk pretraining | [`environments/chonk.toml`](environments/chonk.toml) |
-| Megachonk pretraining | [`environments/megachonk.toml`](environments/megachonk.toml) |
-| Long-context extension | [`environments/lc-extension.toml`](environments/lc-extension.toml) |
-
-All EDFs use `APERTUS2_IMAGE`. Set it to a tested squashfs path or an available
-registry reference before launch. The EDFs do not assume publication.
-Checkouts, data and work directories must be accessible through the EDF mounts.
 
 ## Tests
 
