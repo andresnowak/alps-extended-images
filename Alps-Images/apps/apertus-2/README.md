@@ -65,6 +65,80 @@ The build requires an aarch64 GH200 compute node with Podman. The generated
 script selects the canonical, content-addressed base image.
 See the [manual build guide](../../../manual-build/README.md).
 
+## Run Chonk pretraining
+
+[`example/chonk.sh`](example/chonk.sh) is based on the
+[Chonk launcher in `swiss-ai/pretrain`](https://github.com/swiss-ai/pretrain/blob/6cb927e8b153e2fe9cd660fe0a6332c2ee7ce2a2/apertus-2/pretraining/chonk/chonk.sh).
+It uses [`environments/chonk.toml`](environments/chonk.toml), which selects the
+built image by its content-addressed tag. `CONTAINER_ENV` can select another EDF.
+
+**This is a production configuration:** training requests 256 nodes and 1,024
+GPUs. The warm-up requests 32 nodes. It is not a small-scale test.
+
+### Set the paths and account
+
+Start from the repository root. Replace the input paths with existing directories
+that are accessible through the EDF mounts:
+
+```bash
+SCRIPT=$(realpath Alps-Images/apps/apertus-2/example/chonk.sh)
+ACCOUNT=your-slurm-account
+PARTITION=your-slurm-partition
+
+export MEGATRON_LM_DIR=/path/to/Megatron-LM-MoE
+export TOKENIZER_MODEL=/path/to/tokenizer
+export DATA_ROOT=/path/to/indexed-data
+export WORK_DIR="$SCRATCH/tmp/chonk-pretraining"
+
+mkdir -p "$WORK_DIR/logs"
+cd "$WORK_DIR"
+```
+
+- `MEGATRON_LM_DIR` must contain a compatible `pretrain_gpt.py` checkout.
+- Use the tokenizer from [`swiss-ai/apertus-tokenizer-development`](https://github.com/swiss-ai/apertus-tokenizer-development).
+  Set `TOKENIZER_MODEL` to its local tokenizer directory, which must contain
+  `tokenizer.json`.
+- `DATA_ROOT` must contain Megatron indexed `.bin` and `.idx` shards.
+- Use a new `WORK_DIR` for a new run. Training resumes from its checkpoint
+  directory when a checkpoint exists.
+- Select an available partition that permits the requested node count and time.
+  Training requests 12 hours. `sinfo -a -o "%P %a"` lists partition availability.
+
+Always select the account at submission. The script has no default account.
+Submit from `WORK_DIR` so Slurm writes logs under `WORK_DIR/logs`.
+
+### Check the arguments
+
+```bash
+DRY_RUN=1 bash "$SCRIPT"
+```
+
+This prints the training arguments and task environment. It does not submit a
+job or test the image on a GPU.
+
+### Compile the Triton kernels
+
+```bash
+SBATCH_ACCOUNT="$ACCOUNT" SBATCH_PARTITION="$PARTITION" bash "$SCRIPT" --warmup
+```
+
+The command submits a warm-up job. Wait for it to finish and check its log.
+Repeat until the log reports `SATURATED`. The script saves the kernel archive
+under `WORK_DIR/triton-warm/`. Training requires this archive by default.
+
+### Submit training
+
+```bash
+sbatch -A "$ACCOUNT" --partition="$PARTITION" "$SCRIPT"
+```
+
+The script starts one task per GPU. Checkpoints are stored under
+`WORK_DIR/results/ckpts/`. Slurm logs are stored under `WORK_DIR/logs/`.
+
+The example retains the upstream runtime package installs. These installs can
+shadow packages in the image. The example has not been validated with a full
+training run on this image.
+
 ## Tests
 
 - vetnode hardware and software checks;
