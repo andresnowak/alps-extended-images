@@ -94,7 +94,8 @@ mkdir -p "$WORK_DIR/logs"
 cd "$WORK_DIR"
 ```
 
-- `MEGATRON_LM_DIR` must contain a compatible `pretrain_gpt.py` checkout.
+- Use the [`swiss-ai/Megatron-LM-MoE` fork](https://github.com/swiss-ai/Megatron-LM-MoE).
+  Set `MEGATRON_LM_DIR` to its local checkout, which must contain `pretrain_gpt.py`.
 - Use the tokenizer from [`swiss-ai/apertus-tokenizer-development`](https://github.com/swiss-ai/apertus-tokenizer-development).
   Set `TOKENIZER_MODEL` to its local tokenizer directory, which must contain
   `tokenizer.json`.
