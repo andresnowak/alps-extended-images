@@ -155,7 +155,8 @@ if [[ "${1:-}" != server && "${1:-}" != driver ]]; then
 
     export RUN_DIR EXAMPLE_DIR HF_MODEL
     export GYM_MATH_URL="${GYM_MATH_URL:-https://gym-dev.swissai.svc.cscs.ch/math_with_judge}"
-    export GYM_TRAIN_DATA="${GYM_TRAIN_DATA:-$EXAMPLE_DIR/math-smoke.jsonl}"
+    export GYM_TRAIN_DATA="${GYM_TRAIN_DATA:-$RUN_DIR/data/openmathreasoning-train.jsonl}"
+    export GYM_VAL_DATA="${GYM_VAL_DATA:-$RUN_DIR/data/openmathreasoning-validation.jsonl}"
     GYM_CHAT_TEMPLATE="$(< "$EXAMPLE_DIR/math-chat-template.jinja")"
     export GYM_CHAT_TEMPLATE
     export NEMO_RL_PATH="$RUN_DIR/sources/nemo-rl"
@@ -282,7 +283,16 @@ srun \
     --export=ALL \
     --environment="$ENV_FILE" \
     -u bash -c \
-    'uv pip install --python /usr/bin/python3.12 --no-deps --target "$RUN_DIR/dependencies" "nemo-lens[sdk] @ git+https://github.com/NVIDIA-NeMo/Lens.git@b85578fc2b736a1804705e537001b5f45e9c715d" soundfile==0.13.1 --requirement "$EXAMPLE_DIR/gym-client-requirements.txt"'
+    'set -euo pipefail
+    uv pip install --python /usr/bin/python3.12 --no-deps --target "$RUN_DIR/dependencies" "nemo-lens[sdk] @ git+https://github.com/NVIDIA-NeMo/Lens.git@b85578fc2b736a1804705e537001b5f45e9c715d" soundfile==0.13.1 --requirement "$EXAMPLE_DIR/gym-client-requirements.txt"
+    if [[ "$GYM_TRAIN_DATA" == "$RUN_DIR/data/openmathreasoning-train.jsonl" ]]; then
+        bash "$EXAMPLE_DIR/prepare-data.sh" train "$GYM_TRAIN_DATA"
+    fi
+    if [[ "$GYM_VAL_DATA" == "$RUN_DIR/data/openmathreasoning-validation.jsonl" ]]; then
+        bash "$EXAMPLE_DIR/prepare-data.sh" validation "$GYM_VAL_DATA"
+    fi
+    [[ -f "$GYM_TRAIN_DATA" ]] || { echo "Dataset not found: $GYM_TRAIN_DATA" >&2; exit 2; }
+    [[ -f "$GYM_VAL_DATA" ]] || { echo "Dataset not found: $GYM_VAL_DATA" >&2; exit 2; }'
 
 # One container per node; rank zero runs the Ray head and driver.
 srun \

@@ -29,13 +29,23 @@ It keeps the image's Torch, Ray and OpenAI versions unchanged.
 
 ## Dataset and prompt
 
-`math-smoke.jsonl` contains the first 500 training tasks from NVIDIA's
-[Nemotron-RL-math-OpenMathReasoning dataset](https://huggingface.co/datasets/nvidia/Nemotron-RL-math-OpenMathReasoning/tree/219bf0170cd87cd5db2bbf33715ce9ea43a2c59c),
+The launcher automatically prepares the full training and validation splits of
+NVIDIA's [Nemotron-RL-math-OpenMathReasoning dataset](https://huggingface.co/datasets/nvidia/Nemotron-RL-math-OpenMathReasoning/tree/219bf0170cd87cd5db2bbf33715ce9ea43a2c59c),
 under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
-It keeps the original questions, answers and prompts. Each row adds `agent_ref`
-for the [Swiss AI Gym client](https://github.com/swiss-ai/nemo-gym/tree/swissai-k8s).
-The subset is included in this directory. No dataset download is needed.
-Two iterations do not use all 500 questions.
+These are RL tasks with prompts and reference answers, not the original
+OpenMathReasoning reasoning-trace corpus.
+
+`prepare-data.sh` downloads the pinned files through the HF cache configured by
+`HF_HUB_CACHE` in the container environment. Later jobs reuse the cached files.
+It verifies each checksum and adds `agent_ref` for the
+[Swiss AI Gym client](https://github.com/swiss-ai/nemo-gym/tree/swissai-k8s).
+It keeps all original task fields and does not modify the cached originals.
+The prepared JSONL files go in the job's `data/` directory on scratch.
+No manual download or preparation command is required.
+
+The bundled `math-smoke.jsonl` contains the first 500 training tasks.
+Use it as a smaller training input with `GYM_TRAIN_DATA="$PWD/math-smoke.jsonl"`
+when submitting from this directory. Two GRPO iterations do not use the full split.
 
 The launcher loads `math-chat-template.jinja` for policy tokenization and HTTP
 serving. The template asks for a short solution and a boxed final answer.
@@ -57,15 +67,25 @@ batch, container and output settings. This example also accepts:
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `GYM_MATH_URL` | Math verifier URL shown above | Remote math resources server. |
-| `GYM_TRAIN_DATA` | `$EXAMPLE_DIR/math-smoke.jsonl` | Gym-format training dataset. |
+| `GYM_TRAIN_DATA` | `$RUN_DIR/data/openmathreasoning-train.jsonl` | Training input. A custom path skips automatic training-data preparation. |
+| `GYM_VAL_DATA` | `$RUN_DIR/data/openmathreasoning-validation.jsonl` | Validation input. A custom path skips automatic validation-data preparation. |
+| `GYM_VAL_PERIOD` | `0` | Run validation every N GRPO iterations. `0` disables scheduled validation. |
 | `NEMO_GYM_SOURCE` | `https://github.com/swiss-ai/nemo-gym.git` | Gym Git URL or local checkout. |
 | `NEMO_GYM_REF` | Pinned revision in the launcher | Gym revision. Use matching client dependencies. |
 
-To use another dataset:
+Use absolute paths for custom datasets. These files must already include a valid
+`agent_ref` for the configured agent. To validate every five iterations:
 
 ```bash
-GYM_TRAIN_DATA=/path/to/train.jsonl sbatch train-chonk.sh
+GYM_TRAIN_DATA=/path/to/train.jsonl \
+GYM_VAL_DATA=/path/to/validation.jsonl \
+GYM_VAL_PERIOD=5 \
+MAX_NUM_STEPS=10 \
+sbatch train-chonk.sh
 ```
+
+Validation at the start and end remains disabled. Set `GYM_VAL_PERIOD` to a
+positive value to use the validation split during training.
 
 Set `CHONK_RUN_ROOT` to change the default artifact directory:
 `/iopsstor/scratch/cscs/$USER/tmp/nemo-rl-nemo-gym-chonk/`.

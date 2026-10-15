@@ -18,7 +18,7 @@ grpo:
   advantage_clip_low: -5.0
   advantage_clip_high: 5.0
   max_val_samples: null
-  val_period: 0
+  val_period: ${oc.decode:${oc.env:GYM_VAL_PERIOD,0}}
   val_at_start: false
   val_at_end: false
 
@@ -58,9 +58,8 @@ policy:
     activation_checkpointing: false
     gradient_accumulation_fusion: true
     cuda_graph_impl: none
-    freeze_moe_router: true
+    freeze_moe_router: true  # Router weights.
     moe_router_load_balancing_type: quantile_balancing
-    moe_router_quantile_balancing_freeze: true
     moe_router_dtype: fp32
     moe_router_bias_update_rate: 0.0
     moe_token_dispatcher_type: flex
@@ -79,6 +78,7 @@ policy:
       NRL_REFIT_BUFFER_MEMORY_RATIO: "0.005"
       NRL_REFIT_NUM_BUFFERS: "1"
     model_overrides:
+      moe_router_quantile_balancing_freeze: true  # qb_beta.
       pipeline_model_parallel_layout: null
       virtual_pipeline_model_parallel_size: null
       overlap_moe_expert_parallel_comm: false
@@ -189,7 +189,9 @@ data:
   train:
     dataset_name: NemoGymDataset
     data_path: ${oc.env:GYM_TRAIN_DATA}
-  validation: null
+  validation:
+    dataset_name: NemoGymDataset
+    data_path: ${oc.env:GYM_VAL_DATA}
   default:
     dataset_name: NemoGymDataset
     prompt_file: null

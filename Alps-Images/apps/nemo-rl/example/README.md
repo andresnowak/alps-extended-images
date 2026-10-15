@@ -89,6 +89,7 @@ for scheduling and log settings.
 - BF16 model parameters, FP32 training gradient buffers and synchronous GRPO.
   The KL penalty is 0.01. Checkpoint saves are disabled. The DeepGEMM FP8
   expert backward accumulation kernel needs FP32 gradient storage.
+- Router weights and quantile-balancing thresholds (`qb_beta`) are frozen.
 - Training expert offloading: coarse-grained, 8 chunks, 2 stages, in-place FP8
   parameters and extra parameter storage.
 - Training dispatcher: `flex` with the image's UCCL-backed `deepep` interface.
