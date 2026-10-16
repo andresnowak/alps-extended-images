@@ -10,16 +10,20 @@ grpo:
   async_grpo:
     enabled: false
   max_num_steps: ${oc.decode:${oc.env:MAX_NUM_STEPS}}
-  max_num_epochs: 6
+  max_num_epochs: 3
   num_prompts_per_step: ${oc.decode:${oc.env:NUM_PROMPTS}}
-  num_generations_per_prompt: 8
+  num_generations_per_prompt: 16
   normalize_rewards: true
   use_leave_one_out_baseline: true
   advantage_clip_low: -5.0
   advantage_clip_high: 5.0
-  val_period: 0
-  val_at_start: false
-  val_at_end: false
+  val_period: ${oc.decode:${oc.env:GSM8K_VAL_PERIOD,20}}
+  val_at_start: true
+  val_at_end: true
+  val_batch_size: 128
+  # The validator uses integer batch division; 11 batches include all 1,319 questions.
+  max_val_samples: 1408
+  val_num_generations_per_prompt: 1
 
 checkpointing:
   enabled: false
@@ -38,7 +42,7 @@ policy:
   generation_batch_size: ${oc.decode:${oc.env:INFERENCE_REQUESTS}}
   logprob_batch_size: 1
   offload_optimizer_for_logprob: true
-  max_total_sequence_length: 1280
+  max_total_sequence_length: 2048
   make_sequence_length_divisible_by: 2
   sequence_packing:
     enabled: false
@@ -95,11 +99,11 @@ policy:
       save: ${oc.env:RUN_DIR}/megatron-save
     optimizer:
       optimizer: md_decoupling
-      lr: 2.0e-6
-      min_lr: 2.0e-7
+      lr: 2.0e-7
+      min_lr: 2.0e-8
       min_lr_mode: absolute
-      matrix_lr: 5.0e-5
-      gains_lr: 2.0e-6
+      matrix_lr: 5.0e-6
+      gains_lr: 2.0e-7
       weight_decay: 0.0
       bf16: true
       fp16: false
@@ -130,9 +134,10 @@ policy:
       optimizer_offload_fraction: 0.0
     scheduler:
       lr_decay_style: cosine
-      lr_decay_iters: 1200
-      lr_warmup_iters: 60
-      lr_warmup_init: 1.0e-7
+      # 150 GRPO steps with two optimizer updates per step.
+      lr_decay_iters: 300
+      lr_warmup_iters: 30
+      lr_warmup_init: 2.0e-8
       start_weight_decay: 0.0
       end_weight_decay: 0.0
       weight_decay_incr_style: constant
@@ -145,9 +150,14 @@ policy:
   generation:
     backend: vllm
     temperature: 1.0
-    top_p: 0.9
+    # No nucleus filtering: meaning sample from model probabilities, not uniformly over tokens.
+    top_p: 1.0
     top_k: -1
-    max_new_tokens: 256
+    # This direct-vLLM path requires validation sampling to match training.
+    val_temperature: ${.temperature}
+    val_top_p: ${.top_p}
+    val_top_k: ${.top_k}
+    max_new_tokens: 1024
     stop_strings: ["Question:", "</s>", "<|im_end|>"]
     colocated:
       enabled: false
@@ -174,8 +184,10 @@ data:
   num_workers: 1
   train:
     dataset_name: gsm8k
-    split_validation_size: 0.0
-  validation: null
+    split: train
+  validation:
+    dataset_name: gsm8k
+    split: test
   default:
     prompt_file: ${oc.env:EXAMPLE_DIR}/gsm8k-five-shot.txt
     system_prompt_file: null
@@ -197,6 +209,6 @@ logger:
   wandb_enabled: ${oc.decode:${oc.env:WANDB_ENABLED,false}}
   wandb:
     project: ${oc.env:WANDB_PROJECT,chonk-grpo}
-    name: ${oc.env:WANDB_NAME,chonk-${oc.env:SLURM_JOB_ID,local}}
+    name: ${oc.env:WANDB_NAME,chonk-gsm8k-${oc.env:SLURM_JOB_ID,local}}
   tensorboard_enabled: false
   num_val_samples_to_print: 8

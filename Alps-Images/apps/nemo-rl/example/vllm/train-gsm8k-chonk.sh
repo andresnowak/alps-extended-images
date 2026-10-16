@@ -6,10 +6,12 @@
 #SBATCH --exclusive
 #SBATCH --account=csstaff
 #SBATCH --partition=normal
-#SBATCH --time=02:00:00
+#SBATCH --time=05:00:00
 #SBATCH --output=/iopsstor/scratch/cscs/%u/tmp/gsm8k-chonk-%j.out
 #SBATCH --job-name=gsm8k-chonk
 set -Eeuo pipefail
+# Do not leave crash dumps in the submission directory.
+ulimit -c 0
 
 EXAMPLE_DIR="${EXAMPLE_DIR:-${SLURM_SUBMIT_DIR:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)}}"
 # Shared .env overrides include W&B project/entity/group and credentials.
@@ -137,21 +139,23 @@ if [[ "${1:-}" != server && "${1:-}" != driver ]]; then
     INFERENCE_NODES=8
     TOTAL_NODES=24
     # Batch size and iteration overrides.
-    TRAIN_MICRO_BATCH="${TRAIN_MICRO_BATCH:-1}"
+    # GSM8K_VAL_PERIOD controls periodic validation in the YAML (default: 20).
+    TRAIN_MICRO_BATCH="${TRAIN_MICRO_BATCH:-2}"
     INFERENCE_REQUESTS="${INFERENCE_REQUESTS:-32}"
-    MAX_NUM_STEPS="${MAX_NUM_STEPS:-2}"
-    NUM_PROMPTS="${NUM_PROMPTS:-32}"
-    TRAIN_GLOBAL_BATCH=128
+    MAX_NUM_STEPS="${MAX_NUM_STEPS:-150}"
+    NUM_PROMPTS="${NUM_PROMPTS:-64}"
+    TRAIN_GLOBAL_BATCH=512
     (( TRAIN_MICRO_BATCH > 0 && INFERENCE_REQUESTS > 0 && NUM_PROMPTS > 0 && MAX_NUM_STEPS > 0 )) || {
         echo 'Batch settings and steps must be positive.' >&2
         exit 2
     }
     # TP1/PP4/CP1 on four GPUs per node gives TRAIN_NODES data-parallel ranks.
     (( TRAIN_GLOBAL_BATCH % (TRAIN_NODES * TRAIN_MICRO_BATCH) == 0 )) || {
-        echo 'Global batch 128 must divide into complete training microbatches.' >&2
+        echo 'Global batch 512 must divide into complete training microbatches.' >&2
         exit 2
     }
-    (( (NUM_PROMPTS * 8) % TRAIN_GLOBAL_BATCH == 0 )) || {
+    # GSM8K/vLLM uses 16 responses per prompt, as set in grpo-chonk-vllm.yaml.
+    (( (NUM_PROMPTS * 16) % TRAIN_GLOBAL_BATCH == 0 )) || {
         echo 'Rollout batch must divide into training batches.' >&2
         exit 2
     }
