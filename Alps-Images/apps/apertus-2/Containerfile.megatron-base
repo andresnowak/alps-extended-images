@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-# Apertus2 Megatron kernel stack reconstructed from the training squashfs.
+# Apertus2 Megatron kernel stack reconstructed from the training squashfs of Megachonk training image.
 # See README.md for inspected images, source provenance and validation limits.
 ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
@@ -162,7 +162,7 @@ RUN set -eux; \
     export PIP_CONSTRAINT=/opt/alps/apertus2-base-pins.txt; \
     pip_install python3 --no-cache-dir -r /opt/alps/apertus2-requirements.txt
 
-COPY Alps-Images/apps/apertus-2/tests/ /opt/tests/apertus-2/
+COPY Alps-Images/apps/apertus-2/tests/megatron-base/ /opt/tests/apertus-2/megatron-base/
 RUN set -eux; \
     chmod -R a+rX /opt/tests/apertus-2; \
-    python3 /opt/tests/apertus-2/check-stack.py --metadata-only
+    python3 /opt/tests/apertus-2/megatron-base/check-stack.py --metadata-only

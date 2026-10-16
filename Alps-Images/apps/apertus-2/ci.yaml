@@ -1,21 +1,52 @@
 tests:
-  cuda:
+  megatron-base:
     - name: vetnode
       kind: cuda-vetnode
+      runner: cuda
+
     - name: stack-smoke
       runner: cuda
       timeout: 30m
       script:
-        - python3 /opt/tests/apertus-2/check-stack.py
+        - python3 /opt/tests/apertus-2/megatron-base/check-stack.py
       variables:
         SLURM_JOB_NUM_NODES: "1"
         SLURM_NTASKS: "1"
         UCCL_EP_TRANSPORT: "cxi"
+
     - name: uccl-internode
       runner: cuda
       timeout: 2h
       script:
-        - bash /opt/tests/apertus-2/uccl-internode.sh
+        - bash /opt/tests/apertus-2/megatron-base/uccl-internode.sh
       variables:
         SLURM_JOB_NUM_NODES: "2"
         SLURM_NTASKS: "8"
+
+  megatron:
+    - name: vetnode
+      kind: cuda-vetnode
+      runner: cuda
+
+    - name: stack-smoke
+      runner: cuda
+      timeout: 45m
+      script:
+        - python3 /opt/tests/apertus-2/megatron/check-stack.py
+      variables:
+        SLURM_JOB_NUM_NODES: "1"
+        SLURM_NTASKS: "1"
+        UCCL_EP_TRANSPORT: "cxi"
+        UCCL_P2P_TRANSPORT: "cxi"
+        UCCL_CXI_THREADING: "safe"
+
+    - name: uccl-internode
+      runner: cuda
+      timeout: 2h
+      script:
+        - bash /opt/tests/apertus-2/megatron/uccl-internode.sh
+      variables:
+        SLURM_JOB_NUM_NODES: "2"
+        SLURM_NTASKS: "8"
+        UCCL_P2P_TRANSPORT: "cxi"
+        UCCL_CXI_THREADING: "safe"
