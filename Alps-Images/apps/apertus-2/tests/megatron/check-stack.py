@@ -20,7 +20,7 @@ NATIVE_VERSIONS = {
     "flash-linear-attention": "0.5.2",
     "causal-conv1d": "1.7.0",
     "fast-hadamard-transform": "1.1.0",
-    "flash-attn-3": "3.0.0b1",
+    "flash-attn-3": "3.0.0",
     "nvidia-resiliency-ext": "0.6.0",
     "mamba-ssm": "2.3.1",
     "uccl": "0.1.1",

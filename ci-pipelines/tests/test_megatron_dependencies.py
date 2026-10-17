@@ -13,6 +13,11 @@ def dependency_check():
     return runpy.run_path(str(STACK_CHECK))["check_dependencies"]
 
 
+def test_fa3_version_matches_the_pinned_build():
+    stack = runpy.run_path(str(STACK_CHECK))
+    assert stack["NATIVE_VERSIONS"]["flash-attn-3"] == "3.0.0"
+
+
 def test_dependency_conflict_is_rejected(monkeypatch, dependency_check):
     monkeypatch.setattr(metadata, "requires", lambda name: ["apache-tvm-ffi<=0.1.9"])
     monkeypatch.setattr(metadata, "version", lambda name: "0.1.11")

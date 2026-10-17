@@ -91,7 +91,7 @@ It builds native extensions against that stack.
 | Mamba | `2.3.1` | Mamba and Mamba2; forced source build |
 | causal-conv1d | `1.7.0` | Forced source build |
 | fast-hadamard-transform | `1.1.0` | Pinned source build |
-| FlashAttention 3 | `3.0.0b1` | Pinned Hopper source build |
+| FlashAttention 3 | `3.0.0` | Pinned Hopper source build |
 | FlashInfer Python | `0.6.16.post3` | Matched to the JIT cache |
 | FlashInfer JIT cache | `0.6.16.post3` | Built for this CUDA stack |
 
