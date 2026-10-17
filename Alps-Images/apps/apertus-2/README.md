@@ -98,8 +98,8 @@ It builds native extensions against that stack.
 | Build group | Target | Default maximum jobs |
 | --- | --- | --- |
 | UCCL, TE and other native builds | Includes SM90 | `8` |
-| FA3 | SM90 | `4` |
-| FlashInfer cache | SM90a | `4`, with one NVCC thread |
+| FA3 | SM90 | `8`, with two NVCC threads |
+| FlashInfer cache | SM90a | `16`, with one NVCC thread |
 
 Mamba 2.3.1 avoids the TVM-FFI dependency conflict in 2.3.2.post1.
 Mamba3 is not included. Mamba uses its upstream CUDA architecture list.

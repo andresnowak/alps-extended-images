@@ -10,9 +10,9 @@ export UV_PYTHON_DOWNLOADS=never
 : "${UCCL_MAX_JOBS:=8}"
 : "${TE_MAX_JOBS:=8}"
 : "${KERNEL_MAX_JOBS:=8}"
-: "${FA3_MAX_JOBS:=4}"
+: "${FA3_MAX_JOBS:=8}"
 : "${FA3_PTXAS_OPT:=1}"
-: "${FLASHINFER_CACHE_MAX_JOBS:=4}"
+: "${FLASHINFER_CACHE_MAX_JOBS:=16}"
 
 uv_install() {
     uv pip install \
@@ -313,6 +313,7 @@ PY
             NVCC_THREADS=2 \
             CUDA_HOME=/usr/local/cuda \
             uv_install \
+                --verbose \
                 --no-build-isolation \
                 --no-deps \
                 .
@@ -356,6 +357,7 @@ PY
             MAX_JOBS="$FLASHINFER_CACHE_MAX_JOBS" \
             FLASHINFER_NVCC_THREADS=1 \
             python3 -m pip wheel \
+                --verbose \
                 --no-cache-dir \
                 --no-deps \
                 --no-build-isolation \

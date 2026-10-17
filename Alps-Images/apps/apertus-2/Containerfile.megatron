@@ -25,9 +25,9 @@ COPY Alps-Images/apps/apertus-2/sources/megatron/ /opt/alps/megatron/
 ARG UCCL_MAX_JOBS=8
 ARG TE_MAX_JOBS=8
 ARG KERNEL_MAX_JOBS=8
-ARG FA3_MAX_JOBS=4
+ARG FA3_MAX_JOBS=8
 ARG FA3_PTXAS_OPT=1
-ARG FLASHINFER_CACHE_MAX_JOBS=4
+ARG FLASHINFER_CACHE_MAX_JOBS=16
 ARG UV_PYTHON_DOWNLOADS=never
 
 ENV UV_DEFAULT_INDEX=https://jfrog.svc.cscs.ch/artifactory/api/pypi/pypi-remote/simple \
