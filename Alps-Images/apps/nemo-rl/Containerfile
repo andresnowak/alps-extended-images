@@ -265,6 +265,12 @@ ARG UCCL_MAX_JOBS=8
 # stand-in the image would silently get a non-GH200 build. The stub answers the two
 # queries setup.py makes and is removed inside the same layer, so it can never
 # shadow the real nvidia-smi at run time.
+#
+# The patch moves EP's D2H handle table from managed to device memory. The driver
+# evicts managed pages when a cudaMalloc finds the GPU full, and combine then
+# fails with "an illegal memory access was encountered". Drop it once
+# uccl-project/uccl#1085 is merged and UCCL_REF includes it.
+COPY Alps-Images/apps/nemo-rl/sources/uccl-ep-d2h-handles-device-memory.patch /opt/alps/uccl-ep-d2h-handles-device-memory.patch
 RUN set -eux; \
     hard="$(ulimit -Hn)"; \
     if [[ "${hard}" == unlimited ]]; then hard=65536; fi; \
@@ -280,6 +286,7 @@ RUN set -eux; \
     # build_inner.sh uses /io for its wheel output and packaging steps.
     git clone --recursive "${UCCL_REPO}" /io; \
     git -C /io checkout -q "${UCCL_REF}"; \
+    git -C /io apply /opt/alps/uccl-ep-d2h-handles-device-memory.patch; \
     git -C /io submodule update --init --recursive; \
     mkdir -p /tmp/gpustub /opt/wheels/uccl; \
     # Use Python as in app/vllm-apertus2: NGC's ENV/BASH_ENV initialization
