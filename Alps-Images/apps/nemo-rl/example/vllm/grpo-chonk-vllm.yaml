@@ -12,7 +12,7 @@ grpo:
   max_num_steps: ${oc.decode:${oc.env:MAX_NUM_STEPS}}
   max_num_epochs: 3
   num_prompts_per_step: ${oc.decode:${oc.env:NUM_PROMPTS}}
-  num_generations_per_prompt: 16
+  num_generations_per_prompt: ${oc.decode:${oc.env:GENERATIONS_PER_PROMPT}}
   normalize_rewards: true
   use_leave_one_out_baseline: true
   advantage_clip_low: -5.0

@@ -10,8 +10,7 @@ a local math verifier.
 From the parent example directory:
 
 ```bash
-cd nemo-gym-vllm
-sbatch train-chonk.sh
+bash train.sh nemo-gym-vllm
 ```
 
 No environment variables are required for the default setup.
@@ -24,7 +23,8 @@ No environment variables are required for the default setup.
 
 Check that the partition is available before submission. See the
 [parent README](../README.md) for training settings. The
-[launcher](train-chonk.sh) defines source pins and job-local package installs.
+[shared launcher](../train.sh) defines source pins and job-local package installs.
+The [recipe profile](recipe.env) selects defaults and the NeMo PR stack.
 It keeps the image's Torch, Ray and OpenAI versions unchanged.
 
 ## Dataset and prompt
@@ -45,8 +45,9 @@ The prepared JSONL files go in the job's `data/` directory on scratch.
 No manual download or preparation command is required.
 
 The bundled `math-smoke.jsonl` contains the first 500 training tasks.
-Use it as a smaller training input with `GYM_TRAIN_DATA="$PWD/math-smoke.jsonl"`
-when submitting from this directory. Two GRPO iterations do not use the full split.
+Use it as a smaller training input with
+`GYM_TRAIN_DATA="$PWD/nemo-gym-vllm/math-smoke.jsonl"` when submitting from the
+parent example directory. Two GRPO iterations do not use the full split.
 
 The launcher loads `math-chat-template.jinja` for policy tokenization and HTTP
 serving. The template asks for a short solution and a boxed final answer.
@@ -59,7 +60,7 @@ Set `MAX_NUM_STEPS` to change the maximum number of GRPO iterations
 
 ```bash
 MAX_NUM_STEPS=10 \
-sbatch --time=04:00:00 train-chonk.sh
+bash train.sh nemo-gym-vllm --time=04:00:00
 ```
 
 See the [shared override table](../README.md#environment-overrides) for model,
@@ -84,7 +85,7 @@ GYM_TRAIN_DATA=/path/to/train.jsonl \
 GYM_VAL_DATA=/path/to/validation.jsonl \
 GYM_VAL_PERIOD=5 \
 MAX_NUM_STEPS=10 \
-sbatch train-chonk.sh
+bash train.sh nemo-gym-vllm
 ```
 
 Validation at the start and end remains disabled. Set `GYM_VAL_PERIOD` to a
@@ -104,7 +105,7 @@ curl --fail --max-time 15 https://gym-dev.swissai.svc.cscs.ch/math_with_judge/
 
 ## Test result
 
-Job `5046558` ran this repository launcher and completed both GRPO iterations.
+Job `5046558` completed both GRPO iterations with this recipe.
 Remote rewards, weight updates and policy training completed. The driver and
 Slurm exit codes were zero.
 

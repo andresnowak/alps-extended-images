@@ -1,46 +1,44 @@
 # Chonk GRPO on Alps
 
-Three standalone Slurm/Ray examples use Megatron training:
+Three Slurm/Ray recipes share one Bash launcher and use Megatron training:
 
-| Directory | Generation backend | Configuration |
-| --- | --- | --- |
-| [`vllm/`](vllm/) | vLLM, standard all-gather/reduce-scatter | `grpo-chonk-vllm.yaml` |
-| [`megatron/`](megatron/) | Megatron dynamic inference | `grpo-chonk-megatron.yaml` |
-| [`nemo-gym-vllm/`](nemo-gym-vllm/) | vLLM, remote NeMo Gym math verifier | `grpo-chonk.yaml` |
+| Recipe | Generation backend | Configuration | Defaults |
+| --- | --- | --- | --- |
+| [`vllm`](vllm/) | vLLM, standard all-gather/reduce-scatter | `grpo-chonk-vllm.yaml` | [Profile](vllm/recipe.env) |
+| [`megatron`](megatron/) | Megatron dynamic inference | `grpo-chonk-megatron.yaml` | [Profile](megatron/recipe.env) |
+| [`nemo-gym-vllm`](nemo-gym-vllm/) | vLLM, remote NeMo Gym math verifier | `grpo-chonk.yaml` | [Profile](nemo-gym-vllm/recipe.env) |
 
 The first two examples use GSM8K. The `nemo-gym-vllm/` example prepares the full
 OpenMathReasoning RL training and validation splits. It also includes an optional
 500-task smoke input.
 
-Each GSM8K directory has its own Bash launcher, YAML and five-shot prompt.
-The examples share this README and [`environment.toml`](environment.toml).
-Neither GSM8K example needs files from the other backend directory.
+Each recipe has its own YAML and `recipe.env` profile. GSM8K recipes also keep
+separate five-shot prompts. All use [`train.sh`](train.sh) and
+[`environment.toml`](environment.toml).
 
 ## Submit
 
-Choose a backend and submit from its directory:
+From this directory, choose one recipe:
 
 ```bash
-cd vllm
-sbatch train-gsm8k-chonk.sh
+bash train.sh vllm
 ```
 
-Or:
+Use `megatron` or `nemo-gym-vllm` instead for the other recipes. The launcher also
+works from another directory when called by its path.
 
-```bash
-cd megatron
-sbatch train-gsm8k-chonk.sh
-```
+Use `bash train.sh`, not direct `sbatch`. It loads the recipe's resource defaults
+before submitting the Slurm job.
 
 The defaults are account `csstaff`, partition `normal` and 24 nodes.
 GSM8K/vLLM defaults to 150 GRPO steps; the other examples default to two.
-The launchers define the walltime defaults; override `--time` as needed for a
+The recipe profiles define walltime defaults; override `--time` as needed for a
 full run.
 Use `sinfo -a` to check which partitions are available.
 Set `--partition` and other Slurm options for your account:
 
 ```bash
-sbatch --account=YOUR_PROJECT --partition=YOUR_PARTITION --time=02:00:00 train-gsm8k-chonk.sh
+bash train.sh vllm --account=YOUR_PROJECT --partition=YOUR_PARTITION --time=06:00:00
 ```
 
 The driver runs in the Ray head's container. Worker tasks wait for the driver
@@ -49,11 +47,11 @@ to finish. They return the driver's exit status.
 ## Environment overrides
 
 Set these variables before submission. They apply to all three examples.
-For example, from a GSM8K example directory:
+For example, from this directory:
 
 ```bash
 MAX_NUM_STEPS=10 \
-sbatch --time=04:00:00 train-gsm8k-chonk.sh
+bash train.sh vllm --time=04:00:00
 ```
 
 | Variable | Default | Purpose |
@@ -63,13 +61,13 @@ sbatch --time=04:00:00 train-gsm8k-chonk.sh
 | `TRAIN_MICRO_BATCH` | `2` (GSM8K/vLLM), `1` (others) | Training microbatch size per GPU. |
 | `INFERENCE_REQUESTS` | `32` | Generation batch size; also the native Megatron request limit. |
 | `HF_MODEL` | Chonk path shown below | Read-only Hugging Face model directory. |
-| `NEMO_RL_ENVIRONMENT` | `../environment.toml` | Container environment file, relative to the example directory by default. |
-| `CHONK_RUN_ROOT` | Backend-specific scratch directory in the launcher | Directory for job artifacts and source checkouts. |
+| `NEMO_RL_ENVIRONMENT` | `environment.toml` beside the shared launcher | Container environment file. |
+| `CHONK_RUN_ROOT` | Backend-specific scratch directory selected by `recipe.env` | Directory for job artifacts and source checkouts. |
 | `NRL_MEGATRON_CHECKPOINT_DIR` | `$RUN_DIR/hf-import` | HF-to-Megatron conversion directory. Reuse only a compatible conversion. |
 | `MEGATRON_CONFIG_LOCK_DIR` | `/tmp/chonk-caches-JOBID/megatron-config-locks` | Directory for Bridge config locks. |
 | `RAY_PORT` | `6379` | Ray head port. |
 | `NEMO_RL_SOURCE`, `BRIDGE_SOURCE`, `MEGATRON_SOURCE` | Swiss AI repository URLs in the launcher | Git URLs or local checkouts that contain the required revisions. |
-| `EXAMPLE_DIR` | Submission directory, or script directory outside Slurm | Example files to use. Set this if you submit from another directory. |
+| `EXAMPLE_DIR` | Selected recipe directory | Override with another compatible config/prompt directory. |
 
 Batch sizes must satisfy both rules:
 
@@ -77,15 +75,15 @@ Batch sizes must satisfy both rules:
 - `NUM_PROMPTS * responses_per_prompt` must be divisible by the global batch:
   use 16 responses for GSM8K/vLLM and 8 for the other examples.
 
-The launchers fix the node split at 16 training nodes and 8 generation nodes.
-The global batch is 512 for GSM8K/vLLM and 128 for the other examples.
-These are not environment overrides.
+The recipe profiles set 16 training nodes and 8 generation nodes.
+The global batch is 512 for GSM8K/vLLM and 128 for the other recipes.
+Profiles also set responses per prompt. These are not environment overrides.
 Use Slurm options such as `--account`, `--partition`, `--time` and `--output`
 for scheduling and log settings.
 
 ## Optional W&B logging
 
-W&B is disabled by default. All three launchers load an optional `.env` file
+W&B is disabled by default. The shared launcher loads an optional `.env` file
 beside this README and `environment.toml`. From this README's directory, create
 it without replacing an existing file:
 
@@ -107,7 +105,7 @@ Edit `.env` before submitting. Set `WANDB_ENABLED=true` and supply your settings
 | `WANDB_MODE` | `online` when enabled | Set `offline` to save locally without contacting W&B. |
 
 Use shell-compatible `KEY=value` assignments. Quote values that contain spaces.
-The launchers source this file, so use only a trusted file. Its values override
+The launcher sources this file, so use only a trusted file. Its values override
 existing environment variables with the same names. The real `.env` is
 Git-ignored; do not put credentials in YAML or commit them.
 
@@ -174,7 +172,8 @@ Set `MEGATRON_CONFIG_LOCK_DIR` to use another location.
 
 Generation is asynchronous. GRPO updates are synchronous.
 The [config](vllm/grpo-chonk-vllm.yaml) and
-[launcher](vllm/train-gsm8k-chonk.sh) define the GSM8K default recipe.
+[profile](vllm/recipe.env) define the GSM8K default recipe. The shared
+[launcher](train.sh) handles submission and setup.
 
 | Setting | GSM8K/vLLM default |
 | --- | --- |
@@ -229,19 +228,19 @@ These are operational smoke tests, not model-quality or numerical-parity checks.
 
 ## Sources
 
-The launchers define repository URLs, commit pins and PR refs. Use the launcher
-as the source of truth for versions:
+The shared [launcher](train.sh) defines repository URLs, common pins and fetch
+steps. Recipe profiles select the NeMo PR stack and per-example defaults:
 
-- [vLLM launcher](vllm/train-gsm8k-chonk.sh)
-- [Megatron launcher](megatron/train-gsm8k-chonk.sh)
-- [NeMo Gym launcher](nemo-gym-vllm/train-chonk.sh)
+- [vLLM profile](vllm/recipe.env)
+- [Megatron profile](megatron/recipe.env)
+- [NeMo Gym profile](nemo-gym-vllm/recipe.env)
 
-Each launcher downloads public repositories into the job's run directory.
+The launcher downloads public repositories into the job's run directory.
 It records the fetched revisions in `applied-prs.txt` and the source trees in
 `source-provenance.txt`. Check these files to identify the code used by a run.
 No developer checkout, bundled patch or Python launcher helper is needed.
 
-The launchers install Lens and soundfile in a job-local package directory.
+The launcher installs Lens and soundfile in a job-local package directory.
 The Gym example also installs the packages in `gym-client-requirements.txt`.
 Set `NEMO_RL_SOURCE`, `BRIDGE_SOURCE` or `MEGATRON_SOURCE` to use compatible Git
 URLs or local checkouts. These checkouts must contain the required revisions.
