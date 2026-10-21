@@ -1,246 +1,165 @@
 # Chonk GRPO on Alps
 
-Three Slurm/Ray recipes share one Bash launcher and use Megatron training:
+## Choose a recipe
 
-| Recipe | Generation backend | Configuration | Defaults |
+| Recipe | Profile | Configuration | Defaults |
 | --- | --- | --- | --- |
-| [`vllm`](vllm/) | vLLM, standard all-gather/reduce-scatter | `grpo-chonk-vllm.yaml` | [Profile](vllm/recipe.env) |
-| [`megatron`](megatron/) | Megatron dynamic inference | `grpo-chonk-megatron.yaml` | [Profile](megatron/recipe.env) |
-| [`nemo-gym-vllm`](nemo-gym-vllm/) | vLLM, remote NeMo Gym math verifier | `grpo-chonk.yaml` | [Profile](nemo-gym-vllm/recipe.env) |
+| `vllm/gsm8k` | `adamw` | [YAML](vllm/gsm8k/config.yaml) | [adamw.env](vllm/gsm8k/adamw.env) |
+| `vllm/gsm8k` | `muon` | [YAML](vllm/gsm8k/config.yaml) | [muon.env](vllm/gsm8k/muon.env) |
+| `megatron/gsm8k` | `adamw` | [YAML](megatron/gsm8k/config.yaml) | [adamw.env](megatron/gsm8k/adamw.env) |
+| `megatron/gsm8k` | `muon` | [YAML](megatron/gsm8k/config.yaml) | [muon.env](megatron/gsm8k/muon.env) |
+| `vllm/nemo-gym` (k8s) | `recipe` (default) | [YAML — sync GRPO](vllm/nemo-gym/grpo-chonk.yaml) | [recipe.env](vllm/nemo-gym/recipe.env) |
 
-The first two examples use GSM8K. The `nemo-gym-vllm/` example prepares the full
-OpenMathReasoning RL training and validation splits. It also includes an optional
-500-task smoke input.
+The GSM8K [shared YAML](common/gsm8k.yaml) defines training and data settings. Each
+backend YAML defines its generation engine. Each `.env` profile is self-contained.
 
-Each recipe has its own YAML and `recipe.env` profile. GSM8K recipes also keep
-separate five-shot prompts. All use [`train.sh`](train.sh) and
-[`environment.toml`](environment.toml).
+## Launch
 
-## Submit
-
-From this directory, choose one recipe:
+From this directory, choose one:
 
 ```bash
-bash train.sh vllm
+bash train.sh vllm/gsm8k --profile muon \
+  --grpo-steps 58 --prompts 128 --generations-per-prompt 16 --updates-per-rollout 4 \
+  -- --account=YOUR_PROJECT --partition=YOUR_PARTITION --time=07:00:00
+# Or use native generation:
+bash train.sh megatron/gsm8k --profile adamw \
+  -- --account=YOUR_PROJECT --partition=YOUR_PARTITION --time=07:00:00
 ```
 
-Use `megatron` or `nemo-gym-vllm` instead for the other recipes. The launcher also
-works from another directory when called by its path.
+Put training options before `--` and Slurm options after it. Run `bash train.sh --help`
+for all options. CLI values override the shared `.env` and selected profile.
+The launcher also works from another directory when called by its full path.
 
-Use `bash train.sh`, not direct `sbatch`. It loads the recipe's resource defaults
-before submitting the Slurm job.
+Use `bash train.sh`, **not direct `sbatch`**: the launcher selects resources before
+submitting. For GSM8K, AdamW uses 8 training nodes and 4 generation nodes.
+Muon uses 16 training nodes and 4 generation nodes. Each node has four GPUs.
+Check partition availability with `sinfo -a` before submitting.
 
-The defaults are account `csstaff`, partition `normal` and 24 nodes.
-GSM8K/vLLM defaults to 150 GRPO steps; the other examples default to two.
-The recipe profiles define walltime defaults; override `--time` as needed for a
-full run.
-Use `sinfo -a` to check which partitions are available.
-Set `--partition` and other Slurm options for your account:
+## Shared training configuration
 
-```bash
-bash train.sh vllm --account=YOUR_PROJECT --partition=YOUR_PARTITION --time=06:00:00
+- UCCL provides the DeepEP-compatible training dispatcher over Slingshot/CXI
+  (`UCCL_EP_TRANSPORT=cxi`). Token dispatch uses BF16.
+- Router weights are frozen (`freeze_moe_router`), as are quantile-balancing
+  thresholds (`moe_router_quantile_balancing_freeze`).
+
+## Settings
+
+- Edit the shared or backend **YAML** for structured model and engine settings.
+- Edit the selected **`.env` profile** for resource, batch, learning-rate and run-budget defaults.
+- Use `--micro-batch`, `--lr`, `--matrix-lr`, `--gains-lr`, `--train-nodes` or
+  `--generation-nodes` to override those defaults for one run.
+- The shared container image and mounts are in [environment.toml](environment.toml).
+- `HF_MODEL` overrides the read-only starting checkpoint.
+- `CHONK_RUN_ROOT` selects where job directories, source checkouts and logs are written.
+  The initial HF-to-Megatron conversion is stored under each job's `hf-import/`.
+- Global batch is derived as `prompts × generations per prompt ÷ updates per rollout`.
+  The launcher rejects fractional batches and incomplete data/expert-parallel groups.
+- The GSM8K default budget is **58 GRPO steps × 4 updates = 232 optimizer updates**.
+  The requested GRPO step count controls the run; there is no separate one-epoch cap.
+
+The default HF checkpoint is:
+
+```text
+/capstor/store/cscs/swissai/infra01/apertus_checkpoints/v2/hf/chonk/pretraining/long_context/long-context-iter-0003576
 ```
 
-The driver runs in the Ray head's container. Worker tasks wait for the driver
-to finish. They return the driver's exit status.
+### Local environment and W&B
 
-## Environment overrides
-
-Set these variables before submission. They apply to all three examples.
-For example, from this directory:
-
-```bash
-MAX_NUM_STEPS=10 \
-bash train.sh vllm --time=04:00:00
-```
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `MAX_NUM_STEPS` | `150` (GSM8K/vLLM), `2` (others) | Maximum GRPO iterations. The YAML epoch limit also applies. |
-| `NUM_PROMPTS` | `64` (GSM8K/vLLM), `32` (others) | Prompts per GRPO iteration. Each produces 16 responses in GSM8K/vLLM, or 8 in the other examples. |
-| `TRAIN_MICRO_BATCH` | `2` (GSM8K/vLLM), `1` (others) | Training microbatch size per GPU. |
-| `INFERENCE_REQUESTS` | `32` | Generation batch size; also the native Megatron request limit. |
-| `HF_MODEL` | Chonk path shown below | Read-only Hugging Face model directory. |
-| `NEMO_RL_ENVIRONMENT` | `environment.toml` beside the shared launcher | Container environment file. |
-| `CHONK_RUN_ROOT` | Backend-specific scratch directory selected by `recipe.env` | Directory for job artifacts and source checkouts. |
-| `NRL_MEGATRON_CHECKPOINT_DIR` | `$RUN_DIR/hf-import` | HF-to-Megatron conversion directory. Reuse only a compatible conversion. |
-| `MEGATRON_CONFIG_LOCK_DIR` | `/tmp/chonk-caches-JOBID/megatron-config-locks` | Directory for Bridge config locks. |
-| `RAY_PORT` | `6379` | Ray head port. |
-| `NEMO_RL_SOURCE`, `BRIDGE_SOURCE`, `MEGATRON_SOURCE` | Swiss AI repository URLs in the launcher | Git URLs or local checkouts that contain the required revisions. |
-| `EXAMPLE_DIR` | Selected recipe directory | Override with another compatible config/prompt directory. |
-
-Batch sizes must satisfy both rules:
-
-- The global batch must be divisible by `16 * TRAIN_MICRO_BATCH`.
-- `NUM_PROMPTS * responses_per_prompt` must be divisible by the global batch:
-  use 16 responses for GSM8K/vLLM and 8 for the other examples.
-
-The recipe profiles set 16 training nodes and 8 generation nodes.
-The global batch is 512 for GSM8K/vLLM and 128 for the other recipes.
-Profiles also set responses per prompt. These are not environment overrides.
-Use Slurm options such as `--account`, `--partition`, `--time` and `--output`
-for scheduling and log settings.
-
-## Optional W&B logging
-
-W&B is disabled by default. The shared launcher loads an optional `.env` file
-beside this README and `environment.toml`. From this README's directory, create
-it without replacing an existing file:
+Create a local settings file without replacing an existing one:
 
 ```bash
 cp -n .env.example .env
 chmod 600 .env
 ```
 
-Edit `.env` before submitting. Set `WANDB_ENABLED=true` and supply your settings:
+Set `WANDB_ENABLED=true`, `WANDB_PROJECT`, and `WANDB_API_KEY` in `.env`.
+Set `WANDB_ENTITY` if you need a specific user or team namespace.
+You can also set a run root there, for example:
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `WANDB_ENABLED` | `false` | Enable W&B logging. |
-| `WANDB_PROJECT` | `chonk-grpo` | Project that contains the runs. |
-| `WANDB_ENTITY` | W&B account default | User or team namespace. |
-| `WANDB_RUN_GROUP` | Unset | Group related runs within a project. |
-| `WANDB_NAME` | `chonk-JOBID`, or `chonk-gsm8k-JOBID` for GSM8K/vLLM | Run display name. W&B creates a unique run ID separately. |
-| `WANDB_API_KEY` | Unset | Credentials for online logging. Keep the real key private. |
-| `WANDB_MODE` | `online` when enabled | Set `offline` to save locally without contacting W&B. |
-
-Use shell-compatible `KEY=value` assignments. Quote values that contain spaces.
-The launcher sources this file, so use only a trusted file. Its values override
-existing environment variables with the same names. The real `.env` is
-Git-ignored; do not put credentials in YAML or commit them.
-
-Run files go under the job's `nemo-rl-logs/` directory. The shared EDF defaults
-`WANDB_CACHE_DIR` to `/ritom/scratch/cscs/${USER}/cache/wandb` so jobs can reuse
-artifact-cache files. Shell startup settings can override this default.
-Set a shared cache path in any custom EDF too.
-
-Config, upload staging and downloaded-artifact directories stay in job scratch.
-Override those paths with `WANDB_CONFIG_DIR`, `WANDB_DATA_DIR` and
-`WANDB_ARTIFACT_DIR` if needed. Keep them outside `$HOME`.
-
-## Shared configuration
-
-- Training: 16 nodes / 64 GPUs, TP1/PP4/CP1/EP16, no virtual pipeline.
-  The four pipeline stages contain 8/12/12/10 layers.
-- Generation: 8 nodes / 32 GPUs, TP1/PP1/EP8. Generation uses separate nodes.
-- Training microbatch/global batch: 2/512 for GSM8K/vLLM;
-  1/128 for the other examples.
-- Training-worker allocator: `PYTORCH_ALLOC_CONF=expandable_segments:True`.
-  Generation workers do not inherit this setting.
-- Rollout batch: 64 prompts × 16 generations = 1,024 responses for GSM8K/vLLM;
-  32 prompts × 8 generations = 256 responses for the other examples.
-- BF16 model parameters, FP32 training gradient buffers and synchronous GRPO.
-  The KL penalty is 0.01. Checkpoint saves are disabled. The DeepGEMM FP8
-  expert backward accumulation kernel needs FP32 gradient storage.
-- Router weights and quantile-balancing thresholds (`qb_beta`) are frozen.
-- Training expert offloading: coarse-grained, 8 chunks, 2 stages, in-place FP8
-  parameters and extra parameter storage.
-- Training dispatcher: `flex` with the image's UCCL-backed `deepep` interface.
-  Token dispatch uses BF16. The examples disable expert-communication overlap
-  and delayed weight-gradient computation. UCCL settings match
-  [`pretrain/chonk.sh`](https://github.com/swiss-ai/pretrain/blob/6cb927e8b153e2fe9cd660fe0a6332c2ee7ce2a2/apertus-2/pretraining/chonk/chonk.sh):
-  - `UCCL_EP_TRANSPORT=cxi`
-  - `UCCL_EP_DISPATCH_CONFIG=24,40,512,32,512`
-  - `UCCL_EP_COMBINE_CONFIG=24,7,512,32,512`
-  - `UCCL_EP_CPU_TIMEOUT_SECS=6000`
-  - `CUDA_DEVICE_MAX_CONNECTIONS=1`
-  These settings apply to training workers only. Generation keeps its existing
-  dispatcher.
-- Weight refit: ordinary NeMo packed NCCL with Bridge conversion for all examples.
-
-The default read-only HF model is:
-
-```text
-/capstor/store/cscs/swissai/infra01/apertus_checkpoints/v2/hf/chonk/pretraining/long_context/long-context-iter-0003576
+```bash
+CHONK_RUN_ROOT=/ritom/scratch/cscs/$USER/tmp/chonk-grpo/runs
 ```
 
-The launcher and EDF set the cache locations.
+The launcher sources `.env`, so use only a trusted file. Its values override
+matching environment variables. It is Git-ignored; never commit API keys.
+Keep run directories and caches outside `$HOME`.
 
-Bridge config locks are small lock files used when Megatron-Bridge loads a
-Hugging Face model configuration, such as `config.json`. Processes that share
-the lock directory take turns loading the same model's config. This prevents
-races when they download or cache it. These files contain no model weights
-and are not checkpoints.
+## GSM8K
 
-The default directory is `/tmp/chonk-caches-JOBID/megatron-config-locks`.
-It is node-local, so it does not coordinate processes on different nodes.
-Set `MEGATRON_CONFIG_LOCK_DIR` to use another location.
+The active recipes validate on all 1,319 GSM8K test questions.
+`GSM8K_VAL_PERIOD` overrides the validation interval. Weight-checkpoint settings
+include a final save, no optimizer state, a save period of
+1,000 steps, and a checkpoint deadline of 4h40m. All outputs stay under the run root.
 
-## Generation backends
+By default, each GSM8K rollout batch has **128 prompts × 16 responses = 2,048 samples**.
+It is split into **four groups of 512 samples**, with one optimizer update per
+group: **four optimizer updates per GRPO step**. These are distinct training
+batches, not four passes over the same samples.
 
-### vLLM
+GSM8K has 7,473 training prompts. With `drop_last=True`:
 
-Generation is asynchronous. GRPO updates are synchronous.
-The [config](vllm/grpo-chonk-vllm.yaml) and
-[profile](vllm/recipe.env) define the GSM8K default recipe. The shared
-[launcher](train.sh) handles submission and setup.
-
-| Setting | GSM8K/vLLM default |
-| --- | --- |
-| Rollout | 64 prompts × 16 responses = 1,024 samples |
-| Training batch | Global 512; microbatch 2/GPU; two updates per rollout |
-| Run budget | 150 GRPO steps; at most three dataset epochs |
-| Token limits | 1,024 generated; 2,048 total |
-| Peak LR | Matrices `5e-6`; base and gains `2e-7` |
-| LR schedule | Cosine; 300 updates total, first 30 warmup |
-| Sampling | Temperature 1; top-p 1; model probabilities, not uniform sampling |
-| Validation | Start, every 20 steps, end; one sampled response per question |
-| Checkpoints | Disabled |
-
-Set `GSM8K_VAL_PERIOD` to change the validation interval. Validation uses the
-training sampler and the official GSM8K test split (1,319 questions).
-
-#### Measured results
-
-Reference run: [5066872](https://wandb.ai/apertus/smoke-apertus2-chonk-grpo/runs/qhoymofg).
-
-| Metric | GRPO step | Result |
+| Prompts per GRPO step | GRPO steps per epoch | Epochs at 150 steps |
 | --- | --- | --- |
-| GSM8K validation accuracy | 0 | 46.63% |
-| GSM8K validation accuracy | 120 | **71.87%** |
-| Accuracy gain | 0 → 120 | **+25.2 percentage points** |
-| Time per GRPO step | 135 | 121.77 s (≈2.03 min) |
-| Policy training (two optimizer updates) | 135 | 45.01 s (≈22.5 s/update) |
-| Rollout generation (1,024 responses) | 135 | 23.59 s |
-| Policy/reference log-probability inference | 135 | 32.48 s |
-| Weight refit | 135 | 9.76 s |
-| End-to-end throughput | 135 | ≈5,850 tokens/s |
-| End-to-end throughput per GPU | 135 | ≈60.9 tokens/s/GPU |
+| 64 | 116 | 1.29 |
+| 128 | 58 | 2.59 |
 
-Throughput counts prompt and generated tokens across 96 GPUs.
+Epochs count prompt batches, regardless of responses per prompt or optimizer updates.
 
-### Megatron
+### Reference results
 
-The Megatron example uses native dynamic inference with local, layer-scope
-CUDA graphs and MoE padding. With the current EP8/NCCL dispatcher, decode uses
-CUDA graphs. Prefill runs without CUDA graphs.
+These supplied reference results are not measurements of the local examples.
 
-## Validation
+| Metric | vLLM AdamW | Megatron AdamW | vLLM MD | Megatron MD |
+| --- | --- | --- | --- | --- |
+| Job ID | 3686420 | 3686429 | 3686113 | 3689066 |
+| Training + generation nodes | 8 + 4 | 8 + 4 | 16 + 4 | 16 + 4 |
+| Run time (min) | 78 | 132 | 74 | 110 |
+| Evaluation before | 49.1% | 48.1% | 48.2% | 47.2% |
+| Evaluation after | **90.7%** | **91.1%** | **78.5%** | **78.7%** |
+| `gen_kl` max | 0.0021 | 0.0018 | 0.0007 | 0.0006 |
+| Trainer time (s) | 60.8 | 59.4 | 55.7 | 54.5 |
+| Generation time (s) | 33.9 | 174 | 33.2 | 143 |
+| Throughput (tokens/s/GPU) | 432 | 322 | 263 | 206 |
+| Time per GRPO step (s) | 69.8 | 125.9 | 65.9 | 106.7 |
+| Average refit time (s) | 7.6 | 3.8 | 8.7 | 2.8 |
+| Trajectory age (steps) | 1 | 1 | 1 | 1 |
 
-- Megatron: native generation and training completed two GRPO updates
-  (job 5039868).
-- vLLM: async generation and packed NCCL refit completed two GRPO updates
-  (job 5045801).
-- NeMo Gym vLLM: remote math verification and packed NCCL refit completed two
-  GRPO updates (job 5046558); see its [validation notes](nemo-gym-vllm/README.md).
+## NeMo Gym (k8s) results (synchronous GRPO)
 
-These are operational smoke tests, not model-quality or numerical-parity checks.
+Run [5066314 / cfgsgu5r](https://forge.coreweave.com/wandb/apertus/smoke-apertus2-chonk-grpo/runs/cfgsgu5r).
+Results below are from GRPO step 245 unless another step is stated.
+Training reward is not validation accuracy.
 
-## Sources
+| Metric | Result |
+| --- | --- |
+| Optimizer | Muon / MD-decoupling |
+| Logged GRPO steps | 245 |
+| Optimizer updates | 490 |
+| Prompts × responses per rollout | 128 × 8 |
+| Global batch | 512 |
+| Beginning training reward (step 1) | **1.37%** |
+| Last training reward (step 245) | **5.57%** |
+| Loss | 0.0286 |
+| Generation KL error | 0.0293 |
+| Time per GRPO step (s) | 95.90 |
+| Trainer time, two optimizer updates (s) | 28.89 |
+| Generation time (s) | 18.15 |
+| Policy/reference log-probability inference (s) | 26.09 |
+| Refit time (s) | 10.36 |
 
-The shared [launcher](train.sh) defines repository URLs, common pins and fetch
-steps. Recipe profiles select the NeMo PR stack and per-example defaults:
+## Source revisions
 
-- [vLLM profile](vllm/recipe.env)
-- [Megatron profile](megatron/recipe.env)
-- [NeMo Gym profile](nemo-gym-vllm/recipe.env)
+[train.sh](train.sh) defines repository URLs and common pins; each profile selects
+its NeMo PR stack. Base and PR revisions are fixed commit SHAs, not moving heads.
+The launcher checks out public sources into the run directory and records their
+revisions in `applied-prs.txt` and `source-provenance.txt`.
+The checked-in [NeMo patches](patches/nemo-rl/) are applied after the pinned PR
+merges; [Core patches](patches/megatron/) are applied after exporting the pinned
+Core commit. Their checksums are recorded in `applied-patches.txt` and
+`source-provenance.txt`.
+The default HF checkpoint is read-only.
 
-The launcher downloads public repositories into the job's run directory.
-It records the fetched revisions in `applied-prs.txt` and the source trees in
-`source-provenance.txt`. Check these files to identify the code used by a run.
-No developer checkout, bundled patch or Python launcher helper is needed.
+## Run more experiments
 
-The launcher installs Lens and soundfile in a job-local package directory.
-The Gym example also installs the packages in `gym-client-requirements.txt`.
-Set `NEMO_RL_SOURCE`, `BRIDGE_SOURCE` or `MEGATRON_SOURCE` to use compatible Git
-URLs or local checkouts. These checkouts must contain the required revisions.
+For running and comparing RL experiments, try [rl-infra](https://github.com/swiss-ai/rl-infra),
+created by [@davmels](https://github.com/davmels).

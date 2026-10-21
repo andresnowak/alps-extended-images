@@ -5,8 +5,9 @@ cluster:
   num_nodes: ${oc.decode:${oc.env:TOTAL_NODES}}
   gpus_per_node: 4
 
-# This example uses synchronous Megatron generation, not NeMo Gym or vLLM.
+# Synchronous GRPO with vLLM generation and remote NeMo Gym math verification.
 grpo:
+  seed: 42
   async_grpo:
     enabled: false
   max_num_steps: ${oc.decode:${oc.env:MAX_NUM_STEPS}}
@@ -17,7 +18,8 @@ grpo:
   use_leave_one_out_baseline: true
   advantage_clip_low: -5.0
   advantage_clip_high: 5.0
-  val_period: 0
+  max_val_samples: null
+  val_period: ${oc.decode:${oc.env:GYM_VAL_PERIOD,0}}
   val_at_start: false
   val_at_end: false
 
@@ -31,7 +33,7 @@ policy:
   model_name: ${oc.env:HF_MODEL}
   tokenizer:
     name: ${oc.env:HF_MODEL}
-    chat_template: "{{ bos_token }}{% for message in messages %}{{ message['content'] }}{% endfor %}"
+    chat_template: ${oc.env:GYM_CHAT_TEMPLATE}
   precision: bfloat16
   train_global_batch_size: ${oc.decode:${oc.env:TRAIN_GLOBAL_BATCH}}
   train_micro_batch_size: ${oc.decode:${oc.env:TRAIN_MICRO_BATCH}}
@@ -143,74 +145,60 @@ policy:
       overlap_param_gather: false
       use_custom_fsdp: false
   generation:
-    backend: megatron
+    backend: vllm
     temperature: 1.0
     top_p: 0.9
-    top_k: -1
+    top_k: null
+    val_top_k: ${.top_k}
     max_new_tokens: 256
-    stop_strings: ["Question:", "</s>", "<|im_end|>"]
+    stop_strings: null
+    stop_token_ids: null
     colocated:
       enabled: false
       resources:
         num_nodes: ${oc.decode:${oc.env:INFERENCE_NODES}}
         gpus_per_node: 4
-    # Ordinary NeMo NCCL packed refit.
     refit_transport: null
-    mcore_generation_config:
-      # Replace training env_vars so the allocator setting stays training-only.
-      env_vars:
-        NRL_REFIT_BUFFER_MEMORY_RATIO: "0.005"
-        NRL_REFIT_NUM_BUFFERS: "1"
-      tensor_model_parallel_size: 1
-      pipeline_model_parallel_size: 1
-      num_layers_in_first_pipeline_stage: null
-      num_layers_in_last_pipeline_stage: null
-      expert_model_parallel_size: 8
-      expert_tensor_parallel_size: 1
-      context_parallel_size: 1
-      moe_token_dispatcher_type: alltoall
-      moe_enable_deepep: false
-      # Keep generation free of training-only offloading and UCCL overlap.
-      model_overrides:
-        pipeline_model_parallel_layout: null
-        virtual_pipeline_model_parallel_size: null
-        overlap_moe_expert_parallel_comm: false
-        delay_wgrad_compute: false
-        moe_use_fp8_dispatch: false
-        moe_use_offloading_experts: false
-        moe_use_inplace_fp8_param: false
-        moe_use_extra_fp8_param_storage: false
-      cuda_graph_impl: local
-      inference_cuda_graph_scope: layer
-      num_cuda_graphs: -1
-      moe_pad_experts_for_cuda_graph_inference: true
+    vllm_cfg:
+      async_engine: true
+      expose_http_server: true
+      http_server_serving_chat_kwargs:
+        chat_template: ${policy.tokenizer.chat_template}
+      precision: ${policy.precision}
+      tensor_parallel_size: 1
+      pipeline_parallel_size: 1
+      expert_parallel_size: 8
+      gpu_memory_utilization: 0.8
       max_model_len: ${policy.max_total_sequence_length}
-      max_requests: ${oc.decode:${oc.env:INFERENCE_REQUESTS}}
-      max_tokens: 16384
-      buffer_size_gb: 10
-      block_size_tokens: 256
-      use_cuda_graphs_for_non_decode_steps: true
-      enable_chunked_prefill: true
-      enable_prefix_caching: false
-      async_sched_mode: legacy
-      expose_http_server: false
-      refit_backend: null
-      refit_execution_batch_bytes: null
-      logprobs_mode: raw_logprobs
+      enforce_eager: false
+      load_format: dummy
+    vllm_kwargs:
+      all2all_backend: allgather_reducescatter
+
+env:
+  should_use_nemo_gym: true
+  should_log_nemo_gym_responses: false
+  nemo_gym:
+    config_paths:
+      - ${oc.env:NEMO_GYM_PATH}/responses_api_models/vllm_model/configs/vllm_model_for_training.yaml
+      - ${oc.env:EXAMPLE_DIR}/gym-math.yaml
 
 data:
   max_input_seq_length: 900
   shuffle: true
   num_workers: 1
   train:
-    dataset_name: gsm8k
-    split_validation_size: 0.0
-  validation: null
+    dataset_name: NemoGymDataset
+    data_path: ${oc.env:GYM_TRAIN_DATA}
+  validation:
+    dataset_name: NemoGymDataset
+    data_path: ${oc.env:GYM_VAL_DATA}
   default:
-    prompt_file: ${oc.env:EXAMPLE_DIR}/gsm8k-five-shot.txt
+    dataset_name: NemoGymDataset
+    prompt_file: null
     system_prompt_file: null
-    processor: math_hf_data_processor
-    env_name: math
+    processor: nemo_gym_data_processor
+    env_name: nemo_gym
 
 loss_fn:
   reference_policy_kl_penalty: 0.01

@@ -7,10 +7,10 @@ a local math verifier.
 
 ## Run
 
-From the parent example directory:
+From the main example directory:
 
 ```bash
-bash train.sh nemo-gym-vllm
+bash train.sh vllm/nemo-gym
 ```
 
 No environment variables are required for the default setup.
@@ -18,12 +18,12 @@ No environment variables are required for the default setup.
 - Account: `csstaff`; partition: `normal`; time limit: two hours.
 - Training: 16 nodes. Generation: 8 nodes. Each node has 4 GPUs.
 - Two GRPO iterations, each with 32 questions and 8 responses per question.
-- Shared container environment: `../environment.toml`.
+- Shared container environment: `../../environment.toml`.
 - Math verifier: `https://gym-dev.swissai.svc.cscs.ch/math_with_judge`.
 
 Check that the partition is available before submission. See the
-[parent README](../README.md) for training settings. The
-[shared launcher](../train.sh) defines source pins and job-local package installs.
+[parent README](../../README.md) for training settings. The
+[shared launcher](../../train.sh) defines source pins and job-local package installs.
 The [recipe profile](recipe.env) selects defaults and the NeMo PR stack.
 It keeps the image's Torch, Ray and OpenAI versions unchanged.
 
@@ -46,7 +46,7 @@ No manual download or preparation command is required.
 
 The bundled `math-smoke.jsonl` contains the first 500 training tasks.
 Use it as a smaller training input with
-`GYM_TRAIN_DATA="$PWD/nemo-gym-vllm/math-smoke.jsonl"` when submitting from the
+`GYM_TRAIN_DATA="$PWD/vllm/nemo-gym/math-smoke.jsonl"` when submitting from the
 parent example directory. Two GRPO iterations do not use the full split.
 
 The launcher loads `math-chat-template.jinja` for policy tokenization and HTTP
@@ -60,13 +60,13 @@ Set `MAX_NUM_STEPS` to change the maximum number of GRPO iterations
 
 ```bash
 MAX_NUM_STEPS=10 \
-bash train.sh nemo-gym-vllm --time=04:00:00
+bash train.sh vllm/nemo-gym -- --time=04:00:00
 ```
 
-See the [shared override table](../README.md#environment-overrides) for model,
+See the [shared settings](../../README.md#settings) for model,
 batch, container and output settings. For optional W&B logging, put project,
-entity, group and credentials in the shared `../.env`; see
-[W&B setup](../README.md#optional-wb-logging). This example also accepts:
+entity, group and credentials in the shared `../../.env`; see
+[W&B setup](../../README.md#local-environment-and-wb). This example also accepts:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -85,7 +85,7 @@ GYM_TRAIN_DATA=/path/to/train.jsonl \
 GYM_VAL_DATA=/path/to/validation.jsonl \
 GYM_VAL_PERIOD=5 \
 MAX_NUM_STEPS=10 \
-bash train.sh nemo-gym-vllm
+bash train.sh vllm/nemo-gym
 ```
 
 Validation at the start and end remains disabled. Set `GYM_VAL_PERIOD` to a
