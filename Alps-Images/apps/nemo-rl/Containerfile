@@ -671,16 +671,15 @@ RUN set -eux; \
 COPY Alps-Images/apps/nemo-rl/sources/install-training-stack.sh /opt/alps/
 COPY Alps-Images/apps/nemo-rl/patches/ /opt/alps/training-stack-patches/
 COPY Alps-Images/apps/nemo-rl/sources/gym-client-requirements.txt /opt/alps/gym-client-requirements.txt
-# The pinned NeMo sources were tested on Python 3.12 despite their stricter package metadata.
+# Keep the tested Python 3.12 stack; bypass Python metadata checks for these source installs.
 RUN set -eux; \
     source /opt/alps/package-helpers.sh; \
     bash /opt/alps/install-training-stack.sh; \
     pip_install python3 --break-system-packages --no-cache-dir --no-deps --no-build-isolation \
-      -e /opt/megatron-lm -e /opt/megatron-bridge; \
-    pip_install python3 --break-system-packages --no-cache-dir --no-deps --no-build-isolation \
-      --ignore-requires-python -e /opt/nemo-rl; \
+      --ignore-requires-python -e /opt/megatron-lm -e /opt/megatron-bridge -e /opt/nemo-rl; \
     pip_install python3 --break-system-packages --no-cache-dir --no-deps \
-      -e /opt/nemo-gym \
+      --ignore-requires-python -e /opt/nemo-gym; \
+    pip_install python3 --break-system-packages --no-cache-dir --no-deps \
       -r /opt/alps/gym-client-requirements.txt; \
     site_dir="$(python3 -c 'import site; print(site.getsitepackages()[0])')"; \
     printf '%s\n' /opt/nemo-gym > "${site_dir}/alps-nemo-gym.pth"
