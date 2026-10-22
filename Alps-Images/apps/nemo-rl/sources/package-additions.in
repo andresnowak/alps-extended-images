@@ -6,6 +6,8 @@ flashinfer-jit-cache==0.6.16.post3
 Flask-RESTful==0.3.10
 nemo-lens==0.1.0
 nemo-run==0.11.1
+# NemoRun imports Lepton's v1 API, removed in newer releases.
+leptonai==0.26.6
 # NemoRun/TorchX requires urllib3 < 1.27.
 urllib3==1.26.20
 nltk==3.10.3

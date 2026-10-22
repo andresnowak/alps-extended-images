@@ -20,6 +20,7 @@ PACKAGES = {
     "fast-hadamard-transform": ("fast_hadamard_transform", "1.1.0"),
     "flashinfer-jit-cache": ("flashinfer_jit_cache", "0.6.16.post3"),
     "Flask-RESTful": ("flask_restful", "0.3.10"),
+    "leptonai": ("leptonai.api.v1.types.affinity", "0.26.6"),
     "nemo-lens": ("nemo.lens", "0.1.0"),
     "nemo-run": ("nemo_run", "0.11.1"),
     "nltk": ("nltk", "3.10.3"),
