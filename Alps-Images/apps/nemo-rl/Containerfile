@@ -671,11 +671,14 @@ RUN set -eux; \
 COPY Alps-Images/apps/nemo-rl/sources/install-training-stack.sh /opt/alps/
 COPY Alps-Images/apps/nemo-rl/patches/ /opt/alps/training-stack-patches/
 COPY Alps-Images/apps/nemo-rl/sources/gym-client-requirements.txt /opt/alps/gym-client-requirements.txt
+# The pinned NeMo sources were tested on Python 3.12 despite their stricter package metadata.
 RUN set -eux; \
     source /opt/alps/package-helpers.sh; \
     bash /opt/alps/install-training-stack.sh; \
     pip_install python3 --break-system-packages --no-cache-dir --no-deps --no-build-isolation \
-      -e /opt/megatron-lm -e /opt/megatron-bridge -e /opt/nemo-rl; \
+      -e /opt/megatron-lm -e /opt/megatron-bridge; \
+    pip_install python3 --break-system-packages --no-cache-dir --no-deps --no-build-isolation \
+      --ignore-requires-python -e /opt/nemo-rl; \
     pip_install python3 --break-system-packages --no-cache-dir --no-deps \
       -e /opt/nemo-gym \
       -r /opt/alps/gym-client-requirements.txt; \
