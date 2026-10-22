@@ -1,12 +1,7 @@
 # syntax=docker/dockerfile:1
 
-# NeMo-RL on Alps: Megatron policy + Megatron generation backend (no weight
-# refit), with vLLM plus the MoE/FP8 kernel stack Apertus2 KDA checkpoints need.
-#
-# Kernel stack starts from pytorch2512_alps6_te217_groupgemm0518_emrgopt04_deepgemm_fla52_cconv17_uccl
-# ("megachonk"); UCCL and vLLM align with app/vllm-apertus2. No PYTHONPATH overlays
-# are required at run time. The NeMo-RL checkout itself is NOT vendored: bind-mount
-# it and put it on PYTHONPATH, so the fork stays editable without an image rebuild.
+# NeMo-RL on Alps: pinned NeMo-RL, Megatron-Core, Megatron-Bridge and Gym sources.\
+# Includes native Megatron and vLLM generation plus the MoE/FP8 kernel stack for Apertus2 KDA checkpoints.
 
 ARG BASE_IMAGE
 FROM ${BASE_IMAGE} AS uv-base
@@ -483,9 +478,8 @@ RUN set -eux; \
 # Not reachable on the Megatron-generation path (it does no weight refit, and
 # data_plane defaults to the in-process "simple" backend), but declared in
 # NeMo-RL's base dependencies, so a worker venv or a config flip finds them here
-# rather than failing at run time. Specs match NeMo-RL's pyproject.
-# Build the same CUDA 13 NIXL/UCCL plugin as app/vllm-apertus2, not a generic
-# PyPI NIXL wheel without the UCCL backend.
+# rather than failing at run time.
+# Build the same CUDA 13 NIXL/UCCL plugin as app/vllm-apertus2
 ARG NIXL_REPO=https://github.com/ai-dynamo/nixl.git
 ARG NIXL_REF=de8115ca97d3f8fb63a4988e9b4d4a038b2e0f72
 ARG NIXL_LIBDIR=lib/aarch64-linux-gnu
@@ -659,12 +653,8 @@ assert md.version("protobuf") == "6.33.6"
 VERIFY
 
 # ---- validated package additions --------------------------------------------
-# These exact direct pins were exercised together in an isolated overlay on the
-# CUDA 13.3 / Python 3.12 NGC image. Keep the NemoRun compatibility constraints
-# scoped to this addition set: its TorchX dependency requires the older urllib3.
-# If a future base's urllib3 constraints conflict, fail resolution instead of
-# silently overriding the base's dependency graph.
-COPY Alps-Images/apps/nemo-rl/sources/nemo-run-constraints.txt /opt/alps/nemo-run-constraints.txt
+# These direct runtime pins were exercised together on CUDA 13.3 / Python 3.12.
+# package-additions.in includes the urllib3 pin required by NemoRun/TorchX.
 COPY --from=hadamard-builder /opt/wheels/hadamard/ /opt/wheels/hadamard/
 RUN set -eux; \
     source /opt/alps/package-helpers.sh; \
@@ -672,22 +662,41 @@ RUN set -eux; \
       /opt/alps/package-additions.in > /tmp/package-additions-normal.in; \
     pip_install python3 --break-system-packages --no-cache-dir \
       -c /opt/alps/base-pins.txt -c /tmp/vllm-runtime-constraints.txt \
-      -c /opt/alps/nemo-run-constraints.txt \
       -r /tmp/package-additions-normal.in; \
     pip_install python3 --break-system-packages --no-cache-dir \
       --no-deps /opt/wheels/hadamard/fast_hadamard_transform-*.whl; \
     rm -rf /opt/wheels/hadamard /tmp/vllm-runtime-constraints.txt /tmp/package-additions-normal.in
 
+# ---- consolidated training stack -------------------------------------------
+COPY Alps-Images/apps/nemo-rl/sources/install-training-stack.sh /opt/alps/
+COPY Alps-Images/apps/nemo-rl/patches/ /opt/alps/training-stack-patches/
+COPY Alps-Images/apps/nemo-rl/sources/gym-client-requirements.txt /opt/alps/gym-client-requirements.txt
+RUN set -eux; \
+    source /opt/alps/package-helpers.sh; \
+    bash /opt/alps/install-training-stack.sh; \
+    pip_install python3 --break-system-packages --no-cache-dir --no-deps --no-build-isolation \
+      -e /opt/megatron-lm -e /opt/megatron-bridge -e /opt/nemo-rl; \
+    pip_install python3 --break-system-packages --no-cache-dir --no-deps \
+      -e /opt/nemo-gym \
+      -r /opt/alps/gym-client-requirements.txt; \
+    site_dir="$(python3 -c 'import site; print(site.getsitepackages()[0])')"; \
+    printf '%s\n' /opt/nemo-gym > "${site_dir}/alps-nemo-gym.pth"
+
 # ---- runtime defaults -------------------------------------------------------
-# The point of this image is that every NeMo-RL dependency is already importable,
-# so Ray workers must use the container interpreter rather than building per-worker
-# uv venvs (NeMo-RL's own `uv sync` also fails against a bind-mounted checkout
-# whose vendored Megatron-Bridge submodule is empty).
-ENV NEMO_RL_PY_EXECUTABLES_SYSTEM=1 \
+# Ray workers use the installed stack and container python interpreter, not per-worker venvs.
+ENV NEMO_RL_PATH=/opt/nemo-rl \
+    MEGATRON_PATH=/opt/megatron-lm \
+    MEGATRON_BRIDGE_PATH=/opt/megatron-bridge/src \
+    NEMO_GYM_PATH=/opt/nemo-gym \
+    NEMO_RL_PY_EXECUTABLES_SYSTEM=1 \
     RAY_ENABLE_UV_RUN_RUNTIME_ENV=0 \
     NRL_CONTAINER=1 \
     PYTHONNOUSERSITE=1 \
     UV_LINK_MODE=copy
+
+
+
+
 
 # ---- verification -----------------------------------------------------------
 # Fails the build if any install above moved the NGC torch stack, or if a layer
@@ -761,7 +770,6 @@ RUN set -eux; \
 # Tests shipped with the image. `a+rX` alone is not enough: capital X only adds the
 # bit where one already exists, so a 0644 checkout stays unrunnable.
 COPY Alps-Images/apps/nemo-rl/tests/ /opt/tests/nemo-rl/
-COPY Alps-Images/apps/nemo-rl/sources/mathdx-cufftdx-smoke.cu /opt/tests/nemo-rl/
 RUN set -eux; \
     chmod -R a+rX /opt/tests/nemo-rl; \
     find /opt/tests/nemo-rl -name '*.sh' -exec chmod a+rx {} +

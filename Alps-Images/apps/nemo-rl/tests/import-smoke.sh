@@ -43,7 +43,8 @@ for pkg, prefix in EXPECTED.items():
     print(f"{pkg:<20} {got}")
 
 REQUIRED = [
-    # NeMo-RL core
+    # Installed release sources and NeMo-RL dependencies
+    "nemo_rl", "megatron.core", "megatron.bridge", "nemo_gym",
     "ray", "hydra", "omegaconf", "transformers", "megatron.energon", "vllm",
     "math_verify", "mlflow", "tensordict", "swanlab", "zstandard", "openai",
     "vllm._rust_tool_parser",
@@ -122,7 +123,7 @@ PY
 [[ "${UCCL_CXI_THREADING:-}" == safe ]]
 [[ -f "${NIXL_PLUGIN_DIR:?}/libplugin_UCCL.so" ]]
 
-# Package additions include native GPU checks (FWHT, CuPy, cuFFTDx) and local
+# Package additions include native GPU checks (FWHT, CuPy) and local
 # fixtures only; the script performs no installs, downloads, or model fetches.
 python3 /opt/tests/nemo-rl/package-additions-smoke.py
 

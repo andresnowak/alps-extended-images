@@ -13,19 +13,18 @@ From the main example directory:
 bash train.sh vllm/nemo-gym
 ```
 
-No environment variables are required for the default setup.
+Set `NEMO_RL_IMAGE` as described in the [parent README](../../README.md#launch).
 
 - Account: `csstaff`; partition: `normal`; time limit: two hours.
 - Training: 16 nodes. Generation: 8 nodes. Each node has 4 GPUs.
 - Two GRPO iterations, each with 32 questions and 8 responses per question.
-- Shared container environment: `../../environment.toml`.
+- Container mounts and caches: embedded in `../../train.sh`.
 - Math verifier: `https://gym-dev.swissai.svc.cscs.ch/math_with_judge`.
 
 Check that the partition is available before submission. See the
 [parent README](../../README.md) for training settings. The
-[shared launcher](../../train.sh) defines source pins and job-local package installs.
-The [recipe profile](recipe.env) selects defaults and the NeMo PR stack.
-It keeps the image's Torch, Ray and OpenAI versions unchanged.
+[shared launcher](../../train.sh) uses the image's installed sources and Gym client.
+The [recipe profile](recipe.env) selects training and resource defaults.
 
 ## Dataset and prompt
 
@@ -74,8 +73,6 @@ entity, group and credentials in the shared `../../.env`; see
 | `GYM_TRAIN_DATA` | `$RUN_DIR/data/openmathreasoning-train.jsonl` | Training input. A custom path skips automatic training-data preparation. |
 | `GYM_VAL_DATA` | `$RUN_DIR/data/openmathreasoning-validation.jsonl` | Validation input. A custom path skips automatic validation-data preparation. |
 | `GYM_VAL_PERIOD` | `0` | Run validation every N GRPO iterations. `0` disables scheduled validation. |
-| `NEMO_GYM_SOURCE` | `https://github.com/swiss-ai/nemo-gym.git` | Gym Git URL or local checkout. |
-| `NEMO_GYM_REF` | Pinned revision in the launcher | Gym revision. Use matching client dependencies. |
 
 Use absolute paths for custom datasets. These files must already include a valid
 `agent_ref` for the configured agent. To validate every five iterations:

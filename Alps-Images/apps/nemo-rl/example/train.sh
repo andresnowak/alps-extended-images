@@ -5,6 +5,8 @@ ulimit -c 0
 
 # ----- CLI and recipe selection -----
 
+die() { printf '%s\n' "$*" >&2; exit 2; }
+
 usage() {
     printf '%s\n' \
         'Usage: bash train.sh RECIPE [--profile NAME] [training options] -- [sbatch options]' \
@@ -14,6 +16,12 @@ usage() {
         'Training options: --grpo-steps, --prompts, --generations-per-prompt, --updates-per-rollout,' \
         '  --micro-batch, --train-nodes, --generation-nodes, --inference-requests,' \
         '  --lr, --min-lr, --matrix-lr, --gains-lr, --train-mb-tokens, --logprob-mb-tokens.' \
+        'Development overrides: --dev-COMPONENT-checkout PATH, or --dev-COMPONENT-ref REF' \
+        '  with optional --dev-COMPONENT-repo URL; COMPONENT is nemo, core, bridge or gym.' \
+        '  Repeat --dev-COMPONENT-pr NUMBER_OR_GITHUB_URL, --dev-COMPONENT-merge REF' \
+        '  and --dev-COMPONENT-patch FILE as needed (merges first, then patches).' \
+        '  Only selected components change; no release patch list is applied automatically.' \
+        'Set NEMO_RL_IMAGE to the image containing the consolidated training stack.' \
         'CLI options override the shared .env/environment and profile defaults.' \
         'Use this command rather than direct sbatch; Slurm options must follow --.'
 }
@@ -26,26 +34,19 @@ shift
 if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then usage; exit 0; fi
 mode=submit
 case "${1:-}" in
-    --batch|--server|--driver) mode="${1#--}"; shift ;;
+    --batch|--server|--driver|--prepare-dev) mode="${1#--}"; shift ;;
 esac
 if [[ "$mode" == submit ]]; then
-    [[ -z "${SLURM_JOB_ID:-}" ]] || {
-        echo 'Use bash train.sh from outside an allocation, not direct sbatch.' >&2
-        exit 2
-    }
+    [[ -z "${SLURM_JOB_ID:-}" ]] || die 'Use bash train.sh from outside an allocation, not direct sbatch.'
     LAUNCHER_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 else
-    [[ $# == 0 ]] || { echo 'Unexpected arguments in internal job mode.' >&2; exit 2; }
+    [[ $# == 0 ]] || die 'Unexpected arguments in internal job mode.'
     : "${SLURM_JOB_ID:?Internal job modes require Slurm}"
     # Slurm executes a spooled script, so its BASH_SOURCE is not the repository path.
     : "${CHONK_EXAMPLES_DIR:?Submit with bash train.sh RECIPE}"
     LAUNCHER_DIR="$CHONK_EXAMPLES_DIR"
 fi
 LAUNCHER="$LAUNCHER_DIR/train.sh"
-# Save explicit CLI values, or the resolved values inherited by internal modes.
-knobs=(TRAIN_NODES INFERENCE_NODES MAX_NUM_STEPS NUM_PROMPTS GENERATIONS_PER_PROMPT
-    UPDATES_PER_ROLLOUT TRAIN_MICRO_BATCH INFERENCE_REQUESTS TRAIN_EXPERT_PARALLEL_SIZE
-    TRAIN_MB_TOKENS LOGPROB_MB_TOKENS BASE_LR MIN_LR MATRIX_LR GAINS_LR)
 declare -A overrides=()
 profile="${CHONK_RECIPE_PROFILE:-recipe}"
 if [[ "$mode" == submit ]]; then
@@ -56,10 +57,32 @@ if [[ "$mode" == submit ]]; then
             -h|--help) usage; exit 0 ;;
             --*=*) option="${1%%=*}"; value="${1#*=}"; shift ;;
             --*)
-                (( $# >= 2 )) || { echo "Missing value for $1" >&2; exit 2; }
+                (( $# >= 2 )) || die "Missing value for $1"
                 option="$1"; value="$2"; shift 2 ;;
-            *) echo "Unexpected argument: $1. Put Slurm options after --." >&2; exit 2 ;;
+            *) die "Unexpected argument: $1. Put Slurm options after --." ;;
         esac
+        if [[ "$option" =~ ^--dev-(nemo|core|bridge|gym)-(checkout|repo|ref|merge|pr|patch)$ ]]; then
+            component="${BASH_REMATCH[1]^^}"
+            field="${BASH_REMATCH[2]^^}"
+            [[ -n "$value" && "$value" != *$'\n'* ]] || die "Invalid value for $option"
+            if [[ "$field" == PR ]]; then
+                if [[ "$value" =~ ^[1-9][0-9]*$ ]]; then
+                    value="refs/pull/$value/head"
+                elif [[ "$value" =~ ^https://github.com/([^/]+/[^/]+)/pull/([1-9][0-9]*)/?$ ]]; then
+                    value="https://github.com/${BASH_REMATCH[1]}.git#refs/pull/${BASH_REMATCH[2]}/head"
+                else
+                    die "Invalid PR number or GitHub PR URL: $value"
+                fi
+            fi
+            case "$field" in MERGE|PR) field=MERGES ;; PATCH) field=PATCHES ;; esac
+            key="DEV_${component}_${field}"
+            if [[ "$field" == MERGES || "$field" == PATCHES ]]; then
+                overrides[$key]="${overrides[$key]:+${overrides[$key]}$'\n'}$value"
+            else
+                overrides[$key]="$value"
+            fi
+            continue
+        fi
         case "$option" in
             --profile) profile="$value"; continue ;;
             --grpo-steps) key=MAX_NUM_STEPS ;;
@@ -76,67 +99,73 @@ if [[ "$mode" == submit ]]; then
             --gains-lr) key=GAINS_LR ;;
             --train-mb-tokens) key=TRAIN_MB_TOKENS ;;
             --logprob-mb-tokens) key=LOGPROB_MB_TOKENS ;;
-            *) echo "Unknown training option: $option. Put Slurm options after --." >&2; exit 2 ;;
+            *) die "Unknown training option: $option. Put Slurm options after --." ;;
         esac
         overrides[$key]="$value"
     done
-else
-    for key in "${knobs[@]}"; do
-        if [[ -v "$key" ]]; then overrides[$key]="${!key}"; fi
-    done
 fi
-[[ "$profile" =~ ^[a-zA-Z0-9_-]+$ ]] || { echo 'Invalid profile name.' >&2; exit 2; }
-recipe_profile="$LAUNCHER_DIR/$recipe/$profile.env"
-[[ -f "$recipe_profile" ]] || { echo "Profile not found: $recipe/$profile.env" >&2; exit 2; }
 
 # ----- User settings and recipe defaults -----
 
-# Read .env only at submission so queued jobs retain their CLI overrides.
-if [[ "$mode" == submit ]] && [[ -f "$LAUNCHER_DIR/.env" ]]; then
+# Job processes inherit these settings; do not re-read files after submission.
+if [[ "$mode" == submit ]]; then
+    [[ "$profile" =~ ^[a-zA-Z0-9_-]+$ ]] || die 'Invalid profile name.'
+    recipe_profile="$LAUNCHER_DIR/$recipe/$profile.env"
+    [[ -f "$recipe_profile" ]] || die "Profile not found: $recipe/$profile.env"
+    if [[ -f "$LAUNCHER_DIR/.env" ]]; then
+        set -a
+        # shellcheck source=/dev/null
+        source "$LAUNCHER_DIR/.env"
+        set +a
+    fi
+    recipe_profile="$(readlink -f -- "$recipe_profile")"
     set -a
     # shellcheck source=/dev/null
-    source "$LAUNCHER_DIR/.env"
+    source "$recipe_profile"
     set +a
+    for key in "${!overrides[@]}"; do printf -v "$key" '%s' "${overrides[$key]}"; done
+    EXAMPLE_DIR="$(cd -- "${EXAMPLE_DIR:-$(dirname -- "$recipe_profile")}" && pwd -P)"
 fi
-recipe_profile="$(readlink -f -- "$recipe_profile")"
-set -a
-# shellcheck source=/dev/null
-source "$recipe_profile"
-set +a
-for key in "${!overrides[@]}"; do printf -v "$key" '%s' "${overrides[$key]}"; done
-EXAMPLE_DIR="${EXAMPLE_DIR:-$(dirname -- "$recipe_profile")}"
-EXAMPLE_DIR="$(cd -- "$EXAMPLE_DIR" && pwd -P)"
 
-NEMO_RL_SOURCE="${NEMO_RL_SOURCE:-https://github.com/swiss-ai/Nemo-RL.git}"
-BRIDGE_SOURCE="${BRIDGE_SOURCE:-https://github.com/swiss-ai/Megatron-Bridge.git}"
-MEGATRON_SOURCE="${MEGATRON_SOURCE:-https://github.com/swiss-ai/Megatron-LM-MoE.git}"
+# The older image does not contain the installed source stack.
+: "${NEMO_RL_IMAGE:?Set NEMO_RL_IMAGE to the image built with the consolidated training stack}"
 HF_MODEL="${HF_MODEL:-/capstor/store/cscs/swissai/infra01/apertus_checkpoints/v2/hf/chonk/pretraining/long_context/long-context-iter-0003576}"
-ENV_FILE="${NEMO_RL_ENVIRONMENT:-$LAUNCHER_DIR/environment.toml}"
 RUN_ROOT="${CHONK_RUN_ROOT:-/iopsstor/scratch/cscs/$USER/tmp/$RUN_NAME}"
-if [[ "$GYM_ENABLED" == 1 ]]; then
-    NEMO_GYM_SOURCE="${NEMO_GYM_SOURCE:-https://github.com/swiss-ai/nemo-gym.git}"
-    NEMO_GYM_REF="${NEMO_GYM_REF:-93f232f02074deda2fec13a6848f22e5dca741f5}"
-    export NEMO_GYM_SOURCE NEMO_GYM_REF
-fi
 
-# ----- Fixed source revisions -----
-NEMO_REF=f196ef0a1ccb54d6ce71cd63277fb6a0e01168db
-NEMO_FP8_REF=19843e5a523254ebf3bed49a47a1e852dca29a70
-NEMO_VLLM_DP_REF=05db6ab36b7a0c528c178cbeb44903dbe82fda5d # Pin PR #2517 to the revision tested with the FP8 cache fix.
-MCORE_REF=0536034901962160aac9742d134a84c55e28d224
-BRIDGE_REF=077224531ad4d6d0caef767a84e619b256aa5cb6
-BRIDGE_PR5_REF=6ccdb3c369491374f1fef4320886e8bb1394bb3e
-declare -A NEMO_PR_REFS=(
-    [1]=40a766b21dcfc65c9548fd0cc1ff02869c585869
-    [5]=fe7e3fe71c80c1630487c09a7d49a27e27a3b71e
-    [6]=2bd5dc71c955d9d7bdb12a9d3849529a4ad0d292
-    [7]=e7784d7c052b9d13960dafa15694355b4edf660c
-    [9]=1abfe7fff686168b0cd97161e8ebe064f67a4c05
-)
-for pr in "${NEMO_PRS[@]}"; do
-    [[ -n "${NEMO_PR_REFS[$pr]:-}" ]] || {
-        echo "No pinned commit for NeMo PR #$pr." >&2; exit 2;
-    }
+# ----- Development source selection -----
+
+DEV_ENABLED=0
+for component in NEMO CORE BRIDGE GYM; do
+    checkout_key="DEV_${component}_CHECKOUT"
+    repo_key="DEV_${component}_REPO"
+    ref_key="DEV_${component}_REF"
+    patch_key="DEV_${component}_PATCHES"
+    [[ -z "${!checkout_key:-}" || ( -z "${!repo_key:-}" && -z "${!ref_key:-}" ) ]] ||
+        die "Choose a checkout OR a repository/ref for $component."
+    [[ -z "${!repo_key:-}" || -n "${!ref_key:-}" ]] || die "$repo_key requires $ref_key."
+    for field in CHECKOUT REPO REF MERGES PATCHES; do
+        key="DEV_${component}_${field}"
+        [[ -z "${!key:-}" ]] || DEV_ENABLED=1
+        export "$key"
+    done
+    if [[ "$mode" == submit ]]; then
+        if [[ -n "${!checkout_key:-}" ]]; then
+            [[ -d "${!checkout_key}" ]] || die "Checkout not found: ${!checkout_key}"
+            printf -v "$checkout_key" '%s' "$(cd -- "${!checkout_key}" && pwd -P)"
+            [[ "$(git -C "${!checkout_key}" rev-parse --show-toplevel)" == "${!checkout_key}" ]] ||
+                die "$checkout_key must be a Git checkout root."
+        fi
+        if [[ -n "${!patch_key:-}" ]]; then
+            patches=''
+            while IFS= read -r patch; do
+                [[ -n "$patch" ]] || continue
+                [[ -f "$patch" ]] || die "Patch not found: $patch"
+                patch="$(readlink -f -- "$patch")"
+                patches+="${patches:+$'\n'}$patch"
+            done <<< "${!patch_key}"
+            printf -v "$patch_key" '%s' "$patches"
+        fi
+    fi
 done
 
 # ----- Batch sizing and validation -----
@@ -145,65 +174,39 @@ INFERENCE_REQUESTS="${INFERENCE_REQUESTS:-32}"
 MAX_NUM_STEPS="${MAX_NUM_STEPS:-$DEFAULT_MAX_NUM_STEPS}"
 NUM_PROMPTS="${NUM_PROMPTS:-$DEFAULT_NUM_PROMPTS}"
 # Check integers before Bash arithmetic; invalid input must fail before submission.
-TRAIN_MODEL_PARALLEL_SIZE="${TRAIN_MODEL_PARALLEL_SIZE:-4}"
-for key in TRAIN_NODES INFERENCE_NODES TRAIN_MODEL_PARALLEL_SIZE TRAIN_MICRO_BATCH \
+for key in TRAIN_NODES INFERENCE_NODES TRAIN_MICRO_BATCH \
     INFERENCE_REQUESTS NUM_PROMPTS MAX_NUM_STEPS GENERATIONS_PER_PROMPT \
     UPDATES_PER_ROLLOUT TRAIN_EXPERT_PARALLEL_SIZE GENERATION_EXPERT_PARALLEL_SIZE \
     TRAIN_MB_TOKENS LOGPROB_MB_TOKENS; do
-    [[ ! -v "$key" ]] || [[ "${!key}" =~ ^[1-9][0-9]*$ ]] || {
-        echo "$key must be a positive integer." >&2; exit 2;
-    }
+    [[ ! -v "$key" ]] || [[ "${!key}" =~ ^[1-9][0-9]*$ ]] || die "$key must be a positive integer."
 done
 for key in BASE_LR MIN_LR MATRIX_LR GAINS_LR; do
-    [[ ! -v "$key" ]] || [[ "${!key}" =~ ^[0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?$ ]] || {
-        echo "$key must be a non-negative number." >&2; exit 2;
-    }
+    [[ ! -v "$key" ]] || [[ "${!key}" =~ ^[0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?$ ]] ||
+        die "$key must be a non-negative number."
 done
 if [[ -n "${BASE_LR:-}" && -n "${MIN_LR:-}" ]]; then
-    awk -v base="$BASE_LR" -v minimum="$MIN_LR" 'BEGIN { exit(minimum > base) }' || {
-        echo 'Minimum learning rate must not exceed the base learning rate.' >&2; exit 2;
-    }
+    awk -v base="$BASE_LR" -v minimum="$MIN_LR" 'BEGIN { exit(minimum > base) }' ||
+        die 'Minimum learning rate must not exceed the base learning rate.'
 fi
 TOTAL_NODES=$((TRAIN_NODES + INFERENCE_NODES))
 TOTAL_GPUS=$((TOTAL_NODES * 4))
 if [[ -n "${UPDATES_PER_ROLLOUT:-}" ]]; then
-    (( (NUM_PROMPTS * GENERATIONS_PER_PROMPT) % UPDATES_PER_ROLLOUT == 0 )) || {
-        echo 'Rollout batch must divide into the requested optimizer updates.' >&2; exit 2;
-    }
+    (( (NUM_PROMPTS * GENERATIONS_PER_PROMPT) % UPDATES_PER_ROLLOUT == 0 )) ||
+        die 'Rollout batch must divide into the requested optimizer updates.'
     TRAIN_GLOBAL_BATCH=$((NUM_PROMPTS * GENERATIONS_PER_PROMPT / UPDATES_PER_ROLLOUT))
 fi
-[[ "${TRAIN_GLOBAL_BATCH:-}" =~ ^[1-9][0-9]*$ ]] || {
-    echo 'Derived global batch must be positive.' >&2; exit 2;
-}
-# TRAIN_MODEL_PARALLEL_SIZE is TP × PP × CP.
-(( (TRAIN_NODES * 4) % TRAIN_MODEL_PARALLEL_SIZE == 0 )) || {
-    echo 'Training GPUs must divide into complete model-parallel groups.' >&2; exit 2;
-}
-TRAIN_DATA_PARALLEL_SIZE=$((TRAIN_NODES * 4 / TRAIN_MODEL_PARALLEL_SIZE))
-(( TRAIN_GLOBAL_BATCH % (TRAIN_DATA_PARALLEL_SIZE * TRAIN_MICRO_BATCH) == 0 )) || {
-    echo "Global batch $TRAIN_GLOBAL_BATCH must divide into complete training microbatches." >&2; exit 2;
-}
-(( (NUM_PROMPTS * GENERATIONS_PER_PROMPT) % TRAIN_GLOBAL_BATCH == 0 )) || {
-    echo 'Rollout batch must divide into training batches.' >&2; exit 2;
-}
-if [[ -n "${TRAIN_EXPERT_PARALLEL_SIZE:-}" ]]; then
-    (( TRAIN_DATA_PARALLEL_SIZE % TRAIN_EXPERT_PARALLEL_SIZE == 0 )) || {
-        echo 'Training data-parallel ranks must divide into complete expert-parallel groups.' >&2; exit 2;
-    }
-fi
-if [[ -n "${GENERATION_EXPERT_PARALLEL_SIZE:-}" ]]; then
-    (( (INFERENCE_NODES * 4) % GENERATION_EXPERT_PARALLEL_SIZE == 0 )) || {
-        echo 'Generation GPUs must divide into complete expert-parallel groups.' >&2; exit 2;
-    }
-fi
+[[ "${TRAIN_GLOBAL_BATCH:-}" =~ ^[1-9][0-9]*$ ]] || die 'Derived global batch must be positive.'
+(( (NUM_PROMPTS * GENERATIONS_PER_PROMPT) % TRAIN_GLOBAL_BATCH == 0 )) ||
+    die 'Rollout batch must divide into training batches.'
 UPDATES_PER_ROLLOUT=$((NUM_PROMPTS * GENERATIONS_PER_PROMPT / TRAIN_GLOBAL_BATCH))
-[[ -f "$ENV_FILE" ]] || { echo "EDF not found: $ENV_FILE" >&2; exit 2; }
-[[ -f "$EXAMPLE_DIR/$CONFIG_FILE" ]] || { echo "Config not found: $EXAMPLE_DIR/$CONFIG_FILE" >&2; exit 2; }
-case "$RUN_ROOT/" in "$HOME/"*) echo 'RUN_ROOT must not be under HOME.' >&2; exit 2 ;; esac
+[[ -f "$EXAMPLE_DIR/$CONFIG_FILE" ]] || die "Config not found: $EXAMPLE_DIR/$CONFIG_FILE"
+case "$RUN_ROOT/" in "$HOME/"*) die 'RUN_ROOT must not be under HOME.' ;; esac
+case "$RUN_ROOT" in *\"*|*\\*|*:*|*$'\n'*)
+    die 'RUN_ROOT cannot contain quotes, backslashes, colons or newlines.' ;;
+esac
 
 export CHONK_EXAMPLES_DIR="$LAUNCHER_DIR" EXAMPLE_DIR HF_MODEL
-export NEMO_RL_SOURCE BRIDGE_SOURCE MEGATRON_SOURCE
-export NEMO_RL_ENVIRONMENT="$ENV_FILE" CHONK_RUN_ROOT="$RUN_ROOT"
+export NEMO_RL_IMAGE CHONK_RUN_ROOT="$RUN_ROOT"
 export TRAIN_NODES INFERENCE_NODES TOTAL_NODES TRAIN_GLOBAL_BATCH GENERATIONS_PER_PROMPT
 export TRAIN_MICRO_BATCH INFERENCE_REQUESTS MAX_NUM_STEPS NUM_PROMPTS GYM_ENABLED
 export UPDATES_PER_ROLLOUT TRAIN_EXPERT_PARALLEL_SIZE TRAIN_MB_TOKENS LOGPROB_MB_TOKENS
@@ -217,9 +220,6 @@ if [[ "$mode" == submit ]]; then
         "$MAX_NUM_STEPS" "$UPDATES_PER_ROLLOUT" "$((MAX_NUM_STEPS * UPDATES_PER_ROLLOUT))" \
         "$TRAIN_GLOBAL_BATCH" "$TRAIN_NODES" "$INFERENCE_NODES" >&2
     command -v sbatch >/dev/null || { echo 'sbatch is not available.' >&2; exit 127; }
-    sources=("$NEMO_RL_SOURCE" "$BRIDGE_SOURCE" "$MEGATRON_SOURCE")
-    if [[ "$GYM_ENABLED" == 1 ]]; then sources+=("$NEMO_GYM_SOURCE"); fi
-    for source in "${sources[@]}"; do git ls-remote "$source" HEAD >/dev/null || exit 2; done
     mkdir -p "$RUN_ROOT" "/iopsstor/scratch/cscs/$USER/tmp"
     # Command-line flags work here; #SBATCH directives cannot expand recipe values.
     exec sbatch \
@@ -229,85 +229,140 @@ if [[ "$mode" == submit ]]; then
         --export=ALL "$@" "$LAUNCHER" "$recipe" --batch
 fi
 
-# ----- Source preparation -----
+# ----- Job-local container environment-----
 
 : "${SCRATCH:?SCRATCH must point to scratch storage}"
-[[ "${SLURM_JOB_NUM_NODES:-$TOTAL_NODES}" == "$TOTAL_NODES" ]] || {
-    echo "Requires exactly $TOTAL_NODES nodes." >&2; exit 2;
-}
+[[ "${SLURM_JOB_NUM_NODES:-$TOTAL_NODES}" == "$TOTAL_NODES" ]] || die "Requires exactly $TOTAL_NODES nodes."
 RUN_DIR="$RUN_ROOT/job-${SLURM_JOB_ID}"
-MEGATRON_PATH="/tmp/chonk-mcore-$SLURM_JOB_ID"
+
+# Prepare overrides once in a container, then mount those snapshots on every node.
+prepare_development_sources() {
+    mkdir "$RUN_DIR/dev"
+    export GIT_AUTHOR_NAME='Alps development' GIT_COMMITTER_NAME='Alps development'
+    export GIT_AUTHOR_EMAIL=alps@example.invalid GIT_COMMITTER_EMAIL=alps@example.invalid
+    export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false
+    : > "$RUN_DIR/development-provenance.txt"
+    : > "$RUN_DIR/development-applied-patches.txt"
+    for component in NEMO CORE BRIDGE GYM; do
+        checkout_key="DEV_${component}_CHECKOUT"
+        repo_key="DEV_${component}_REPO"
+        ref_key="DEV_${component}_REF"
+        merge_key="DEV_${component}_MERGES"
+        patch_key="DEV_${component}_PATCHES"
+        [[ -n "${!checkout_key:-}${!repo_key:-}${!ref_key:-}${!merge_key:-}${!patch_key:-}" ]] || continue
+        case "$component" in
+            NEMO) image_path=/opt/nemo-rl; repository=https://github.com/swiss-ai/Nemo-RL.git ;;
+            CORE) image_path=/opt/megatron-lm; repository=https://github.com/swiss-ai/Megatron-LM-MoE.git ;;
+            BRIDGE) image_path=/opt/megatron-bridge; repository=https://github.com/swiss-ai/Megatron-Bridge.git ;;
+            GYM) image_path=/opt/nemo-gym; repository=https://github.com/swiss-ai/nemo-gym.git ;;
+        esac
+        repository="${!repo_key:-$repository}"
+        target="$RUN_DIR/dev/${component,,}"
+        base_kind=image
+        [[ -z "${!checkout_key:-}" ]] || base_kind=checkout
+        if [[ -n "${!ref_key:-}" ]]; then
+            base_kind=ref
+            git clone --no-checkout "$repository" "$target"
+            git -C "$target" fetch origin "${!ref_key}"
+            git -C "$target" checkout --detach FETCH_HEAD
+        else
+            source_path="${!checkout_key:-$image_path}"
+            git -c safe.directory="$source_path" clone --no-hardlinks --no-checkout "$source_path" "$target"
+            git -C "$target" reset --mixed --quiet HEAD
+            tar_excludes=(--exclude=.git --exclude='.env*' --exclude=.venv --exclude=__pycache__)
+            git_excludes=()
+            # Select submodules separately; do not copy them with the parent.
+            while IFS= read -r -d '' entry; do
+                [[ "$entry" == '160000 '* ]] || continue
+                submodule="${entry#*$'\t'}"
+                tar_excludes+=("--exclude=./$submodule")
+                git_excludes+=(":(exclude,literal)$submodule")
+                if [[ -e "$source_path/$submodule/.git" ]]; then
+                    echo "Skipping $component submodule $submodule; override that repository separately if needed." >&2
+                fi
+            done < <(git -C "$source_path" ls-files --stage -z)
+            tar -C "$source_path" "${tar_excludes[@]}" --dereference -cf - . | tar -C "$target" -xf -
+            git -C "$target" add -A -- . "${git_excludes[@]}"
+            if ! git -C "$target" diff --cached --quiet; then
+                git -C "$target" commit -m 'Snapshot development working tree'
+            fi
+        fi
+        printf '%s base %s %s\n' "$component" "$base_kind" "$(git -C "$target" rev-parse HEAD)" >> "$RUN_DIR/development-provenance.txt"
+        while IFS= read -r ref; do
+            [[ -n "$ref" ]] || continue
+            merge_repository="$repository"
+            if [[ "$ref" == *'#'* ]]; then
+                merge_repository="${ref%%#*}"
+                ref="${ref#*#}"
+            fi
+            git -C "$target" fetch "$merge_repository" "$ref"
+            printf '%s merge %s\n' "$component" "$(git -C "$target" rev-parse FETCH_HEAD)" >> "$RUN_DIR/development-provenance.txt"
+            git -C "$target" merge --no-edit FETCH_HEAD
+        done <<< "${!merge_key:-}"
+        while IFS= read -r patch; do
+            [[ -n "$patch" ]] || continue
+            git -C "$target" apply --index "$patch"
+            printf '%s patch ' "$component" >> "$RUN_DIR/development-provenance.txt"
+            sha256sum "$patch" | tee -a "$RUN_DIR/development-applied-patches.txt" >> "$RUN_DIR/development-provenance.txt"
+        done <<< "${!patch_key:-}"
+        printf '%s tree %s\n' "$component" "$(git -C "$target" write-tree)" >> "$RUN_DIR/development-provenance.txt"
+    done
+}
+if [[ "$mode" == prepare-dev ]]; then prepare_development_sources; exit 0; fi
+
+# ----- Create environment toml -----
+ENV_FILE="$RUN_DIR/environment.toml"
+write_environment() {
+    local mounts="\"/capstor/\", \"/iopsstor/\", \"/ritom/\", \"${HOME}:${HOME}\"" component target
+    for component in nemo core bridge gym; do
+        [[ "$DEV_ENABLED" == 1 && -d "$RUN_DIR/dev/$component" ]] || continue
+        case "$component" in
+            nemo) target=/opt/nemo-rl ;; core) target=/opt/megatron-lm ;;
+            bridge) target=/opt/megatron-bridge ;; gym) target=/opt/nemo-gym ;;
+        esac
+        mounts+=", \"$RUN_DIR/dev/$component:$target:ro\""
+    done
+    cat > "$ENV_FILE" <<EOF
+image = "$NEMO_RL_IMAGE"
+mounts = [$mounts]
+workdir = "/tmp"
+writable = true
+
+[env]
+PATH = "/usr/local/lib/python3.12/dist-packages/torch_tensorrt/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/mpi/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/ucx/bin:/opt/amazon/efa/bin:/opt/tensorrt/bin"
+PMIX_MCA_psec = "native"
+NCCL_PXN_DISABLE = "1"
+NCCL_CROSS_NIC = "0"
+UCCL_EP_TRANSPORT = "cxi"
+XDG_CACHE_HOME = "/ritom/scratch/cscs/${USER}/cache"
+HF_HOME = "/ritom/scratch/cscs/${USER}/cache/huggingface"
+HF_HUB_CACHE = "/ritom/scratch/cscs/${USER}/cache/huggingface/hub"
+TORCH_HOME = "/ritom/scratch/cscs/${USER}/cache/torch"
+VLLM_CACHE_ROOT = "/ritom/scratch/cscs/${USER}/cache/vllm"
+WANDB_CACHE_DIR = "/ritom/scratch/cscs/${USER}/cache/wandb"
+FLASHINFER_WORKSPACE_BASE = "/ritom/scratch/cscs/${USER}/cache/flashinfer"
+PIP_CACHE_DIR = "/ritom/scratch/cscs/${USER}/cache/pip"
+UV_CACHE_DIR = "/ritom/scratch/cscs/${USER}/cache/uv"
+
+[annotations]
+com.hooks.cxi.enabled = "false"
+com.hooks.netstack.source = "host"
+EOF
+}
 if [[ "$mode" == batch ]]; then
     mkdir -p "$RUN_DIR"
-    [[ ! -e "$RUN_DIR/sources" ]] || { echo "Refusing to overwrite snapshots: $RUN_DIR/sources" >&2; exit 1; }
-    mkdir -p "$RUN_DIR/sources/megatron"
-    git clone --no-checkout "$NEMO_RL_SOURCE" "$RUN_DIR/sources/nemo-rl"
-    git -C "$RUN_DIR/sources/nemo-rl" checkout --detach "$NEMO_REF"
-    for pr in "${NEMO_PRS[@]}"; do
-        ref="${NEMO_PR_REFS[$pr]}"
-        git -C "$RUN_DIR/sources/nemo-rl" fetch https://github.com/swiss-ai/Nemo-RL.git "$ref"
-        printf 'NeMo PR #%s %s\n' "$pr" "$ref" >> "$RUN_DIR/applied-prs.txt"
-        git -C "$RUN_DIR/sources/nemo-rl" -c user.name='Alps example' \
-            -c user.email=alps@example.invalid -c commit.gpgsign=false merge --no-edit "$ref"
-    done
-    if [[ "$GENERATION_BACKEND" == vllm ]]; then
-        git -C "$RUN_DIR/sources/nemo-rl" fetch https://github.com/NVIDIA-NeMo/RL.git "$NEMO_VLLM_DP_REF"
-        printf 'NeMo upstream PR #2517 ' >> "$RUN_DIR/applied-prs.txt"
-        git -C "$RUN_DIR/sources/nemo-rl" rev-parse FETCH_HEAD >> "$RUN_DIR/applied-prs.txt"
-        # Keep the PR's EP-only multiprocessing executor and the fork's nightly-test budget.
-        git -C "$RUN_DIR/sources/nemo-rl" -c user.name='Alps example' \
-            -c user.email=alps@example.invalid -c commit.gpgsign=false merge --no-commit --no-ff -Xtheirs FETCH_HEAD
-        git -C "$RUN_DIR/sources/nemo-rl" restore --source=HEAD -- tests/unit/test_recipes_and_test_suites.py
-        git -C "$RUN_DIR/sources/nemo-rl" add tests/unit/test_recipes_and_test_suites.py
-        git -C "$RUN_DIR/sources/nemo-rl" -c user.name='Alps example' \
-            -c user.email=alps@example.invalid -c commit.gpgsign=false \
-            commit -m 'Merge upstream vLLM DP PR 2517' \
-            -m 'Use the PR multiprocessing executor and retain the fork nightly-test budget.'
+    [[ "$DEV_ENABLED" == 0 || ! -e "$RUN_DIR/dev" ]] ||
+        die "Refusing to overwrite development snapshots: $RUN_DIR/dev"
+    write_environment
+    if [[ "$DEV_ENABLED" == 1 ]]; then
+        srun --nodes=1 --ntasks=1 --relative=0 --cpus-per-task=1 --gres=none \
+            --mpi=pmix --network=disable_rdzv_get --export=ALL --environment="$ENV_FILE" \
+            -u bash "$LAUNCHER" "$recipe" --prepare-dev
+        write_environment
     fi
-    # PR #8 refreshes FP8 expert caches after optimizer and reference/policy updates.
-    git -C "$RUN_DIR/sources/nemo-rl" fetch https://github.com/swiss-ai/Nemo-RL.git "$NEMO_FP8_REF"
-    git -C "$RUN_DIR/sources/nemo-rl" -c user.name='Alps example' \
-        -c user.email=alps@example.invalid -c commit.gpgsign=false merge --no-edit "$NEMO_FP8_REF"
-    printf 'NeMo PR #8 %s\n' "$NEMO_FP8_REF" >> "$RUN_DIR/applied-prs.txt"
-    for patch in "$LAUNCHER_DIR"/patches/nemo-rl/*.patch; do
-        git -C "$RUN_DIR/sources/nemo-rl" apply "$patch"
-        sha256sum "$patch" >> "$RUN_DIR/applied-patches.txt"
-    done
-
-    if [[ "$GYM_ENABLED" == 1 ]]; then
-        NEMO_GYM_PATH="$RUN_DIR/sources/nemo-rl/3rdparty/Gym-workspace/Gym"
-        git clone --no-checkout "$NEMO_GYM_SOURCE" "$NEMO_GYM_PATH"
-        git -C "$NEMO_GYM_PATH" checkout --detach "$NEMO_GYM_REF"
-        printf 'NeMo Gym %s\n' "$NEMO_GYM_REF" >> "$RUN_DIR/applied-prs.txt"
-        export NEMO_GYM_PATH NEMO_GYM_VENV_DIR="$RUN_DIR/gym-venvs"
-    fi
-    git clone --no-checkout "$MEGATRON_SOURCE" "$RUN_DIR/megatron-repo"
-    git -C "$RUN_DIR/megatron-repo" fetch https://github.com/swiss-ai/Megatron-LM-MoE.git "$MCORE_REF"
-    printf 'Megatron PR #88 ' >> "$RUN_DIR/applied-prs.txt"
-    git -C "$RUN_DIR/megatron-repo" rev-parse FETCH_HEAD >> "$RUN_DIR/applied-prs.txt"
-    git -C "$RUN_DIR/megatron-repo" archive "$MCORE_REF" |
-        tar --extract --touch --directory="$RUN_DIR/sources/megatron"
-    for patch in "$LAUNCHER_DIR"/patches/megatron/*.patch; do
-        git -C "$RUN_DIR/sources/megatron" apply "$patch"
-        sha256sum "$patch" >> "$RUN_DIR/applied-patches.txt"
-    done
-    git clone --no-checkout "$BRIDGE_SOURCE" "$RUN_DIR/sources/bridge"
-    git -C "$RUN_DIR/sources/bridge" checkout --detach "$BRIDGE_REF"
-    git -C "$RUN_DIR/sources/bridge" fetch https://github.com/swiss-ai/Megatron-Bridge.git "$BRIDGE_PR5_REF"
-    git -C "$RUN_DIR/sources/bridge" merge --ff-only "$BRIDGE_PR5_REF"
-    {
-        printf 'NeMo-RL %s\nMegatron-Core %s\nBridge base %s\n' "$NEMO_REF" "$MCORE_REF" "$BRIDGE_REF"
-        cat "$RUN_DIR/applied-prs.txt" "$RUN_DIR/applied-patches.txt"
-        printf 'NeMo merged tree (before local patches) '
-        git -C "$RUN_DIR/sources/nemo-rl" rev-parse 'HEAD^{tree}'
-        printf 'Bridge PR #5 '
-        git -C "$RUN_DIR/sources/bridge" rev-parse HEAD
-    } > "$RUN_DIR/source-provenance.txt"
-
     NRL_MEGATRON_CHECKPOINT_DIR="${NRL_MEGATRON_CHECKPOINT_DIR:-$RUN_DIR/hf-import}"
-    export RUN_DIR NRL_MEGATRON_CHECKPOINT_DIR MEGATRON_PATH
-    export NEMO_RL_PATH="$RUN_DIR/sources/nemo-rl" MEGATRON_BRIDGE_PATH="$RUN_DIR/sources/bridge/src"
-    # W&B job-local paths. The shared artifact cache is set in environment.toml.
+    export RUN_DIR NRL_MEGATRON_CHECKPOINT_DIR
+    export NEMO_GYM_VENV_DIR="$RUN_DIR/gym-venvs"
     export WANDB_CONFIG_DIR="${WANDB_CONFIG_DIR:-$RUN_DIR/wandb/config}"
     export WANDB_DATA_DIR="${WANDB_DATA_DIR:-$RUN_DIR/wandb/data}"
     export WANDB_ARTIFACT_DIR="${WANDB_ARTIFACT_DIR:-$RUN_DIR/wandb/artifacts}"
@@ -336,14 +391,20 @@ if [[ "$mode" == server || "$mode" == driver ]]; then
     export MEGATRON_CONFIG_LOCK_DIR="${MEGATRON_CONFIG_LOCK_DIR:-$cache_root/megatron-config-locks}"
     mkdir -p "$CUDA_CACHE_PATH" "$TRITON_CACHE_DIR" "$TORCHINDUCTOR_CACHE_DIR" \
         "$TORCH_EXTENSIONS_DIR" "$FLASHINFER_WORKSPACE_BASE" "$MEGATRON_CONFIG_LOCK_DIR"
-    if [[ ! -f "$MEGATRON_PATH/megatron/core/__init__.py" ]]; then
-        mkdir -p "$MEGATRON_PATH"
-        cp -R --no-preserve=mode,ownership "$RUN_DIR/sources/megatron/." "$MEGATRON_PATH/"
+    : "${NEMO_RL_PATH:?The image must include the consolidated training stack}"
+    if [[ "$mode" == server && "$SLURM_PROCID" == 0 ]]; then
+        if [[ "$DEV_ENABLED" == 1 ]]; then
+            cp /opt/alps/source-provenance.txt "$RUN_DIR/image-source-provenance.txt"
+            cp /opt/alps/applied-patches.txt "$RUN_DIR/image-applied-patches.txt"
+            printf 'Image defaults: image-source-provenance.txt; selected replacements follow.\n' > "$RUN_DIR/source-provenance.txt"
+            cat "$RUN_DIR/development-provenance.txt" >> "$RUN_DIR/source-provenance.txt"
+            cp "$RUN_DIR/development-applied-patches.txt" "$RUN_DIR/applied-patches.txt"
+        else
+            cp /opt/alps/source-provenance.txt "$RUN_DIR/source-provenance.txt"
+            cp /opt/alps/applied-patches.txt "$RUN_DIR/applied-patches.txt"
+        fi
     fi
-    export PYTHONPATH="$RUN_DIR/dependencies:$NEMO_RL_PATH:$MEGATRON_BRIDGE_PATH:$MEGATRON_PATH:$EXAMPLE_DIR"
-    if [[ "$GYM_ENABLED" == 1 ]]; then
-        export PYTHONPATH="$RUN_DIR/dependencies:$NEMO_RL_PATH:$MEGATRON_BRIDGE_PATH:$MEGATRON_PATH:$NEMO_GYM_PATH:$EXAMPLE_DIR"
-    fi
+    export PYTHONPATH="$EXAMPLE_DIR"
 fi
 
 # ----- Ray servers -----
@@ -419,16 +480,15 @@ if [[ "$GYM_ENABLED" == 1 ]]; then
         --mpi=pmix --network=disable_rdzv_get --export=ALL --environment="$ENV_FILE" \
         -u bash -c '
         set -euo pipefail
-        uv pip install --python /usr/bin/python3.12 --no-deps --target "$RUN_DIR/dependencies" \
-            --requirement "$EXAMPLE_DIR/gym-client-requirements.txt"
         if [[ "$GYM_TRAIN_DATA" == "$RUN_DIR/data/openmathreasoning-train.jsonl" ]]; then
             bash "$EXAMPLE_DIR/prepare-data.sh" train "$GYM_TRAIN_DATA"
         fi
         if [[ "$GYM_VAL_DATA" == "$RUN_DIR/data/openmathreasoning-validation.jsonl" ]]; then
             bash "$EXAMPLE_DIR/prepare-data.sh" validation "$GYM_VAL_DATA"
         fi
-        [[ -f "$GYM_TRAIN_DATA" ]] || { echo "Dataset not found: $GYM_TRAIN_DATA" >&2; exit 2; }
-        [[ -f "$GYM_VAL_DATA" ]] || { echo "Dataset not found: $GYM_VAL_DATA" >&2; exit 2; }'
+        for path in "$GYM_TRAIN_DATA" "$GYM_VAL_DATA"; do
+            [[ -f "$path" ]] || { echo "Dataset not found: $path" >&2; exit 2; }
+        done'
 fi
 
 # ----- Launch -----

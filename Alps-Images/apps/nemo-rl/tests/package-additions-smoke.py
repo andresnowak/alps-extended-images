@@ -15,41 +15,20 @@ import torch
 PACKAGES = {
     "aniso8601": ("aniso8601", "10.0.1"),
     "comet-ml": ("comet_ml", "3.58.7"),
-    "coverage": ("coverage", "7.16.2"),
     "cupy-cuda13x": ("cupy", "14.2.0"),
     "fastokens": ("fastokens", "0.3.2"),
     "fast-hadamard-transform": ("fast_hadamard_transform", "1.1.0"),
     "flashinfer-jit-cache": ("flashinfer_jit_cache", "0.6.16.post3"),
-    "flake8": ("flake8", "7.4.1"),
     "Flask-RESTful": ("flask_restful", "0.3.10"),
-    "hatchling": ("hatchling", "1.32.4"),
-    "mock": ("mock", "5.2.0"),
-    "mypy": ("mypy", "2.4.0"),
     "nemo-lens": ("nemo.lens", "0.1.0"),
     "nemo-run": ("nemo_run", "0.11.1"),
     "nltk": ("nltk", "3.10.3"),
-    "nvidia-mathdx": ("nvidia", "25.6.0"),
     "open-clip-torch": ("open_clip", "3.3.0"),
     "peft": ("peft", "0.21.2"),
-    "pre-commit": ("pre_commit", "4.6.2"),
-    "PyGithub": ("github", "2.10.0"),
-    "pylint": ("pylint", "4.1.2"),
-    "pyrefly": ("pyrefly", "1.3.2"),
-    "pytest-asyncio": ("pytest_asyncio", "1.4.0"),
-    "pytest-cov": ("pytest_cov", "7.1.0"),
-    "pytest-mock": ("pytest_mock", "3.16.0"),
-    "pytest-random-order": ("random_order", "1.2.0"),
-    "pytest-runner": (None, "6.0.1"),
-    "pytest-shard": ("pytest_shard", "0.1.2"),
-    "pytest-testmon": ("testmon", "2.2.0"),
-    "pytest-timeout": ("pytest_timeout", "2.4.0"),
-    "ruff": ("ruff", "0.16.10"),
     "soundfile": ("soundfile", "0.14.0"),
     "tensorstore": ("tensorstore", "0.1.85"),
     "timm": ("timm", "1.0.30"),
     "torch-memory-saver": ("torch_memory_saver", "0.0.10"),
-    "ty": ("ty", "0.0.85"),
-    "types-requests": ("requests", "2.31.0.6"),
     "wget": ("wget", "3.2"),
 }
 
@@ -60,7 +39,7 @@ for distribution, (module, expected) in PACKAGES.items():
         importlib.import_module(module)
     print(f"{distribution} {actual}: import/version PASS")
 
-for command in (["ruff", "--version"], ["nemo", "--help"]):
+for command in (["nemo", "--help"],):
     result = subprocess.run(
         command, check=True, capture_output=True, text=True, timeout=60
     )
@@ -68,7 +47,6 @@ for command in (["ruff", "--version"], ["nemo", "--help"]):
     print(f"{' '.join(command)} CLI PASS")
 
 assert metadata.version("urllib3") == "1.26.20"
-assert metadata.version("types-urllib3") == "1.26.25.14"
 assert torch.cuda.is_available(), "GPU smoke requires a visible CUDA device"
 
 # SoundFile native library: deterministic WAV roundtrip, no external fixture.
@@ -238,29 +216,3 @@ store = ts.open(
 store.write(np.array([[1, 2], [3, 4]], dtype=np.float32)).result()
 np.testing.assert_array_equal(store.read().result(), [[1, 2], [3, 4]])
 print("TensorStore in-memory roundtrip PASS")
-
-# Compile and execute a representative cuFFTDx SM90 kernel from the shipped SDK.
-mathdx = metadata.distribution("nvidia-mathdx")
-include = pathlib.Path(str(mathdx.locate_file("nvidia/mathdx/include")))
-cutlass = pathlib.Path(
-    str(mathdx.locate_file("nvidia/mathdx/external/cutlass/include"))
-)
-assert (include / "cufftdx.hpp").is_file(), include
-source = pathlib.Path(__file__).with_name("mathdx-cufftdx-smoke.cu")
-with tempfile.TemporaryDirectory() as tmp:
-    executable = pathlib.Path(tmp) / "mathdx-cufftdx-smoke"
-    subprocess.run(
-        [
-            "/usr/local/cuda/bin/nvcc",
-            "-std=c++17",
-            "-arch=sm_90",
-            f"-I{include}",
-            f"-I{cutlass}",
-            str(source),
-            "-o",
-            str(executable),
-        ],
-        check=True,
-    )
-    subprocess.run([str(executable)], check=True)
-print("MathDx cuFFTDx SM90 compile/runtime PASS (cuBLASDx/cuSolverDx not covered)")
