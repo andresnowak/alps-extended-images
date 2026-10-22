@@ -20,74 +20,96 @@ Set `NEMO_RL_IMAGE` to the image built with the consolidated training stack
 From this directory, choose one:
 
 ```bash
-bash train.sh vllm/gsm8k --profile muon \
+bash submit.sh vllm/gsm8k --profile muon \
   --grpo-steps 58 --prompts 128 --generations-per-prompt 16 --updates-per-rollout 4 \
-  -- --account=YOUR_PROJECT --partition=YOUR_PARTITION --time=07:00:00
+  --account=YOUR_PROJECT --partition=YOUR_PARTITION --time=07:00:00
 # Or use native generation:
-bash train.sh megatron/gsm8k --profile adamw \
-  -- --account=YOUR_PROJECT --partition=YOUR_PARTITION --time=07:00:00
+bash submit.sh megatron/gsm8k --profile adamw \
+  --account=YOUR_PROJECT --partition=YOUR_PARTITION --time=07:00:00
 ```
 
-Put training options before `--` and Slurm options after it. Run `bash train.sh --help`
-for all options. CLI values override the shared `.env` and selected profile.
-The launcher also works from another directory when called by its full path.
+`submit.sh` reads the profile and training options, then passes the other arguments
+to `sbatch`. No `--` separator is required. The account and partition have no
+launcher defaults; select them on the command line or use your Slurm defaults.
+Training option names, including `--profile`, belong to `submit.sh`. An optional
+`--` passes all remaining arguments directly to Slurm if a name conflicts.
 
-Use `bash train.sh`, **not direct `sbatch`**: the launcher selects resources before
-submitting. For GSM8K, AdamW uses 8 training nodes and 4 generation nodes.
-Muon uses 16 training nodes and 4 generation nodes. Each node has four GPUs.
+Run `bash submit.sh --help` for all options. CLI training values override `.env`
+and profile defaults. You can call the script by its full path from another directory.
+
+The two scripts have separate roles:
+- **`submit.sh`:** runs on the login node, selects resources, submits `train.sh`,
+  prints the job ID and exits. You can close the login shell after submission.
+- **`train.sh`:** runs inside the Slurm allocation. It starts containers, Ray and
+  training with `srun`. It never calls `sbatch`.
+
+For GSM8K, AdamW uses 8 training nodes and 4 generation nodes. Muon uses 16
+training nodes and 4 generation nodes. `submit.sh` sets the total node count and
+time from the profile. Fixed per-node defaults are `#SBATCH` directives in
+`train.sh`; Slurm command-line options can override them.
 Check partition availability with `sinfo -a` before submitting.
+
+### Direct `sbatch` (baked sources only)
+
+For a run that uses the image's installed sources, you can skip `submit.sh`.
+Run from this example directory:
+
+```bash
+sbatch --account=YOUR_PROJECT --partition=YOUR_PARTITION \
+  --nodes=12 --time=07:00:00 \
+  train.sh vllm/gsm8k --profile adamw
+```
+
+Logs default to `/iopsstor/scratch/cscs/%u/tmp/%x-%j.out`, where `%u` is your
+username, `%x` is the job name and `%j` is the job ID. Use `--output` to change it.
+Slurm requires the parent directory to exist; `submit.sh` creates the default
+directory automatically.
+
+Put Slurm options before `train.sh`, and the recipe and profile after it.
+Read the experiment's `.env` profile for its node counts and time limit.
+Use those values to set the Slurm allocation.
+
+Direct runs reuse the settings function in `submit.sh`; sourcing it does not
+submit a job. Training options go after the recipe, for example `--grpo-steps 3`.
+The job reads `.env` and its profile when it starts. Set `CHONK_EXAMPLES_DIR` to
+this directory if you submit from another working directory.
+
+Use `submit.sh` for development source overrides and automatic resource selection.
 
 ## Development overrides
 
-Normal runs use the image's installed stack. To replace a component, use
-`--dev-COMPONENT-checkout PATH` or `--dev-COMPONENT-ref REF`. Replace `COMPONENT`
-with `nemo`, `core`, `bridge` or `gym`. Use `--dev-COMPONENT-repo URL` to select
-another repository with a ref. The default repositories are the Swiss AI forks.
-Use a commit SHA for repeatable runs.
+Use `submit.sh` for custom sources, PRs and patches. Replace `COMPONENT` with
+`nemo`, `core`, `bridge` or `gym`:
 
-For example, start with a clean Core revision and apply only the requested fixes:
-
-```bash
-bash train.sh vllm/gsm8k --profile adamw \
-  --dev-core-ref 0536034901962160aac9742d134a84c55e28d224 \
-  --dev-core-patch "$PWD/../patches/megatron/0001-distrib-optimizer-detach-fp32-param-shards.patch" \
-  -- --account=YOUR_PROJECT --partition=YOUR_PARTITION
-```
-
-Or use a working checkout and merge explicit PRs before applying patches:
+| Option | Purpose |
+| --- | --- |
+| `--dev-COMPONENT-checkout PATH` | Use a local Git checkout, including working-tree changes. |
+| `--dev-COMPONENT-ref REF` | Use a commit, branch or tag; use a SHA for repeatable runs. |
+| `--dev-COMPONENT-repo URL` | Select another repository with a ref; defaults are the Swiss AI forks. |
+| `--dev-COMPONENT-pr NUMBER_OR_URL` | Merge a PR from that repository, or use a full GitHub PR URL. |
+| `--dev-COMPONENT-merge REF` | Merge another branch or commit. |
+| `--dev-COMPONENT-patch FILE` | Apply a patch file. |
 
 ```bash
-bash train.sh megatron/gsm8k --profile muon \
-  --dev-nemo-checkout /ritom/scratch/cscs/$USER/tmp/nemo-rl-dev \
+bash submit.sh megatron/gsm8k --profile muon \
+  --dev-nemo-checkout /path/to/nemo-rl \
   --dev-nemo-pr 5 --dev-nemo-pr 1 \
-  --dev-nemo-pr https://github.com/swiss-ai/Nemo-RL/pull/6 \
-  --dev-nemo-patch /ritom/scratch/cscs/$USER/tmp/nemo-rl-dev-patches/generation.patch \
-  -- --account=YOUR_PROJECT --partition=YOUR_PARTITION
+  --dev-nemo-patch /path/to/fix.patch \
+  --account=YOUR_PROJECT --partition=YOUR_PARTITION
 ```
 
-PR numbers refer to the selected repository. Use a full GitHub PR URL for
-another fork. Repeat `--dev-COMPONENT-merge REF` to merge branches or commits.
-The launcher merges the selected refs in order, then applies the patches in
-order. A conflict stops the job before training. Resolve conflicts in a checkout.
+Each library you patch or merge must have its own `--dev-COMPONENT-checkout`
+or `--dev-COMPONENT-ref`.
+Unselected libraries still use the image's installed versions. Repeat merge and
+patch options as needed; PR merges run first, then patches, each in the listed order.
+A conflict stops the job before training.
 
-The launcher replaces only the components you select. So, a clean checkout or ref
-**doesn't inherit the image's patches** and instead only uses what you provide it (for Megatron, NeMo, Bridge and Gym).
-If you select only PRs, merges or patches, then the launcher starts from the image's version, and its existing fixes remain.
-
-At job start, one container prepares source copies under `$RUN_DIR/dev/`.
-Each node mounts these copies read-only. The launcher does not change the
-original checkouts. It copies working-tree changes, deletions and untracked
-files, but excludes `.git`, `.env*`, `.venv` and Python caches. It does not copy
-submodules with a parent checkout; select each repository separately.
-
-Keep checkouts and patch files on shared storage that the container can access.
-The launcher copies their contents when the job starts, not when you submit it.
-`development-provenance.txt` records base versions, merges, patch checksums and
-tree hashes. In development mode, `applied-patches.txt` lists only the patches
-added for that job. The `image-*` provenance files record the baked defaults.
-Overrides do not install dependencies or rebuild extensions. Use source versions
-that are compatible with the image's Python/CUDA stack.
-Normal runs do not fetch or patch code.
+Keep local checkouts and patch files on shared storage. Repositories and PRs
+can use GitHub URLs. At job start, sources are cloned or copied under
+`$RUN_DIR/dev/` without changing your checkouts. Select submodules separately.
+See `development-provenance.txt` for the resolved versions and patch checksums.
+Source versions must work with the image's Python/CUDA stack; overrides do not
+install dependencies or rebuild extensions.
 
 ## Shared training configuration
 

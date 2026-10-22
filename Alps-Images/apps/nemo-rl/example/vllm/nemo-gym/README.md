@@ -10,12 +10,11 @@ a local math verifier.
 From the main example directory:
 
 ```bash
-bash train.sh vllm/nemo-gym
+bash submit.sh vllm/nemo-gym
 ```
 
 Set `NEMO_RL_IMAGE` as described in the [parent README](../../README.md#launch).
 
-- Account: `csstaff`; partition: `normal`; time limit: two hours.
 - Training: 16 nodes. Generation: 8 nodes. Each node has 4 GPUs.
 - Two GRPO iterations, each with 32 questions and 8 responses per question.
 - Container mounts and caches: embedded in `../../train.sh`.
@@ -23,7 +22,8 @@ Set `NEMO_RL_IMAGE` as described in the [parent README](../../README.md#launch).
 
 Check that the partition is available before submission. See the
 [parent README](../../README.md) for training settings. The
-[shared launcher](../../train.sh) uses the image's installed sources and Gym client.
+[submission script](../../submit.sh) selects the allocation. The
+[batch script](../../train.sh) uses the image's installed sources and Gym client.
 The [recipe profile](recipe.env) selects training and resource defaults.
 
 ## Dataset and prompt
@@ -59,7 +59,7 @@ Set `MAX_NUM_STEPS` to change the maximum number of GRPO iterations
 
 ```bash
 MAX_NUM_STEPS=10 \
-bash train.sh vllm/nemo-gym -- --time=04:00:00
+bash submit.sh vllm/nemo-gym --time=04:00:00
 ```
 
 See the [shared settings](../../README.md#settings) for model,
@@ -82,7 +82,7 @@ GYM_TRAIN_DATA=/path/to/train.jsonl \
 GYM_VAL_DATA=/path/to/validation.jsonl \
 GYM_VAL_PERIOD=5 \
 MAX_NUM_STEPS=10 \
-bash train.sh vllm/nemo-gym
+bash submit.sh vllm/nemo-gym
 ```
 
 Validation at the start and end remains disabled. Set `GYM_VAL_PERIOD` to a
