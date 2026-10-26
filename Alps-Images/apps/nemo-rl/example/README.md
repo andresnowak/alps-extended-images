@@ -193,6 +193,8 @@ GSM8K has 7,473 training prompts. With `drop_last=True`:
 
 Epochs count prompt batches, regardless of responses per prompt or optimizer updates.
 
+Local verification: [all four examples completed 58 GRPO steps in development mode](https://forge.coreweave.com/wandb/apertus/smoke-apertus2-chonk-grpo/groups/nemorl-image-v1-verification/workspace).
+
 ### Reference results
 
 These supplied reference results are not measurements of the local examples.
