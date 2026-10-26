@@ -18,7 +18,7 @@ usage() {
         '  PRs, merges and patches require a checkout or ref for that component.' \
         'Other arguments pass unchanged to sbatch. No -- separator is required.' \
         'CLI training options override .env/environment and profile defaults.' \
-        'Set NEMO_RL_IMAGE to the image containing the installed training stack.' \
+        'NEMO_RL_IMAGE overrides the default container image.' \
         'Returns after submission. The job runs independently of your login shell.'
 }
 
@@ -101,7 +101,7 @@ load_settings() {
     set +a
     for key in "${!overrides[@]}"; do printf -v "$key" '%s' "${overrides[$key]}"; done
     EXAMPLE_DIR="$(cd -- "${EXAMPLE_DIR:-$(dirname -- "$recipe_profile")}" && pwd -P)"
-    : "${NEMO_RL_IMAGE:?Set NEMO_RL_IMAGE to the image built with the installed training stack}"
+    NEMO_RL_IMAGE="${NEMO_RL_IMAGE:-jfrog.svc.cscs.ch/docker-group-csstaff/alps-images/nemo-rl-cuda:alps7-dev-62e3c495bd4200880fc6c652bf9fc68c}"
     HF_MODEL="${HF_MODEL:-/capstor/store/cscs/swissai/infra01/apertus_checkpoints/v2/hf/chonk/pretraining/long_context/long-context-iter-0003576}"
     RUN_ROOT="$(readlink -m -- "${CHONK_RUN_ROOT:-/iopsstor/scratch/cscs/$USER/tmp/$RUN_NAME}")"
 

@@ -34,10 +34,10 @@ loss_fn:
 checkpointing:
   enabled: true
   checkpoint_dir: ${oc.env:RUN_DIR}/checkpoints
-  save_period: 1000
+  save_period: ${oc.decode:${oc.env:CHECKPOINT_SAVE_PERIOD,1000}}
   keep_top_k: 1
   checkpoint_must_save_by: "00:04:40:00"
-  save_optimizer: false
+  save_optimizer: ${oc.decode:${oc.env:CHECKPOINT_SAVE_OPTIMIZER,false}}
 
 policy:
   model_name: ${oc.env:HF_MODEL}

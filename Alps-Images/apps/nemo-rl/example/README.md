@@ -15,9 +15,9 @@ backend YAML defines its generation engine. Each `.env` profile is self-containe
 
 ## Launch
 
-Set `NEMO_RL_IMAGE` to the image built with the consolidated training stack
-(in your shell or `.env`). The older runtime-patched image cannot run this launcher.
-From this directory, choose one:
+The launcher defaults to the consolidated image
+`nemo-rl-cuda:alps7-dev-62e3c495bd4200880fc6c652bf9fc68c` from the CSCS JFrog registry.
+Set `NEMO_RL_IMAGE` in your shell or `.env` to override it. From this directory, choose one:
 
 ```bash
 bash submit.sh vllm/gsm8k --profile muon \
@@ -48,6 +48,11 @@ training nodes and 4 generation nodes. `submit.sh` sets the total node count and
 time from the profile. Fixed per-node defaults are `#SBATCH` directives in
 `train.sh`; Slurm command-line options can override them.
 Check partition availability with `sinfo -a` before submitting.
+
+The launcher generates and validates a GPU-to-CPU topology map for NeMo's worker
+NUMA hooks before starting Ray, and restricts Ray's default CPU allocations to
+CPU DRAM nodes. These task policies do not prevent GPU-driven ATS migration;
+the image's optimizer VMA binding addresses that separately.
 
 ### Direct `sbatch` (baked sources only)
 
@@ -109,7 +114,7 @@ can use GitHub URLs. At job start, sources are cloned or copied under
 `$RUN_DIR/dev/` without changing your checkouts. Select submodules separately.
 See `development-provenance.txt` for the resolved versions and patch checksums.
 Source versions must work with the image's Python/CUDA stack; overrides do not
-install dependencies or rebuild extensions.
+install dependencies. Core's dataset helper is built once during preparation.
 
 ## Shared training configuration
 
@@ -124,11 +129,16 @@ install dependencies or rebuild extensions.
 - Edit the selected **`.env` profile** for resource, batch, learning-rate and run-budget defaults.
 - Use `--micro-batch`, `--lr`, `--matrix-lr`, `--gains-lr`, `--train-nodes` or
   `--generation-nodes` to override those defaults for one run.
-- `NEMO_RL_IMAGE` selects the container image. [train.sh](train.sh) embeds the
-  mounts and cache settings and writes a job-local `environment.toml`.
-- `HF_MODEL` overrides the read-only starting checkpoint.
-- `CHONK_RUN_ROOT` selects where job directories, checkpoints and logs are written.
-  The initial HF-to-Megatron conversion is stored under each job's `hf-import/`.
+
+| Environment variable | Purpose |
+| --- | --- |
+| `NEMO_RL_IMAGE` | Container image; [train.sh](train.sh) writes mounts and cache settings into a job-local `environment.toml`. |
+| `HF_MODEL` | Read-only starting checkpoint. |
+| `CHONK_RUN_ROOT` | Job directories, checkpoints and logs; initial HF conversion goes under each job's `hf-import/`. |
+| `MCORE_CPU_OFFLOAD_NUMA_NODES` | CPU-offload VMA binding. New image builds default to `0-3`; override with the worker's local CPU node, or set empty to disable. |
+| `CHECKPOINT_SAVE_PERIOD` | GSM8K checkpoint interval in GRPO steps; default `1000`. |
+| `CHECKPOINT_SAVE_OPTIMIZER` | Include optimizer state in GSM8K checkpoints; default `false`. |
+
 - Global batch is derived as `prompts × generations per prompt ÷ updates per rollout`.
   The launcher rejects fractional batches. NeMo-RL/Megatron checks parallelism
   and microbatch compatibility.
