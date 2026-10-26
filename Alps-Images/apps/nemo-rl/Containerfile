@@ -690,6 +690,7 @@ ENV NEMO_RL_PATH=/opt/nemo-rl \
     MEGATRON_PATH=/opt/megatron-lm \
     MEGATRON_BRIDGE_PATH=/opt/megatron-bridge/src \
     NEMO_GYM_PATH=/opt/nemo-gym \
+    MCORE_CPU_OFFLOAD_NUMA_NODES=0-3 \
     NEMO_RL_PY_EXECUTABLES_SYSTEM=1 \
     RAY_ENABLE_UV_RUN_RUNTIME_ENV=0 \
     NRL_CONTAINER=1 \
