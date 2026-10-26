@@ -108,6 +108,11 @@ prepare_development_sources() {
             printf '%s patch ' "$component" >> "$RUN_DIR/development-provenance.txt"
             sha256sum "$patch" | tee -a "$RUN_DIR/development-applied-patches.txt" >> "$RUN_DIR/development-provenance.txt"
         done <<< "${!patch_key:-}"
+        if [[ "$component" == CORE ]]; then
+            # Rebuild for the final source and container ABI before the read-only mount.
+            # If not we get a race error of every rank trying to build the datasets helper.cpp as they share the same checkout
+            make -B -C "$target/megatron/core/datasets"
+        fi
         printf '%s tree %s\n' "$component" "$(git -C "$target" write-tree)" >> "$RUN_DIR/development-provenance.txt"
     done
 }
@@ -217,6 +222,32 @@ fi
 # ----- Ray servers -----
 
 if [[ "$mode" == server ]]; then
+    # NeMo RL GPU workers use this map for strict CPU affinity and local membind. At `nemo_rl/distributed/numa_utils.py`
+    [[ "${NRL_DISABLE_NUMA_BINDING:-0}" != 1 && "${NRL_DISABLE_NUMA_MEMBIND:-0}" != 1 ]] || {
+        echo 'Strict NUMA binding requires NRL_DISABLE_NUMA_BINDING and NRL_DISABLE_NUMA_MEMBIND to be unset.' >&2
+        exit 1
+    }
+    export NRL_GPU_CPU_AFFINITY_FILE="$cache_root/gpu-cpu-affinity"
+
+    nvidia-smi topo -m > "$RUN_DIR/topology-$SLURM_PROCID.txt"
+    awk '/^GPU[0-9]+[[:space:]]/ {
+        gpu = $1; sub(/^GPU/, "", gpu)
+        node = $(NF-1); sub(/[,-].*/, "", node)
+        if (node !~ /^[0-9]+$/) exit 1
+        print gpu, node
+    }' "$RUN_DIR/topology-$SLURM_PROCID.txt" | while read -r gpu node; do
+        cpus="$(< "/sys/devices/system/node/node$node/cpulist")"
+        [[ -n "$cpus" ]] || { echo "GPU $gpu has no CPU NUMA affinity." >&2; exit 1; }
+        numactl --cpunodebind="$node" --membind="$node" true
+        printf '%s:%s\n' "$gpu" "$cpus"
+
+    done > "$NRL_GPU_CPU_AFFINITY_FILE.tmp"
+    [[ "$(wc -l < "$NRL_GPU_CPU_AFFINITY_FILE.tmp")" == 4 ]] || {
+        echo 'Expected NUMA affinity mappings for all four GPUs.' >&2; exit 1;
+    }
+    mv "$NRL_GPU_CPU_AFFINITY_FILE.tmp" "$NRL_GPU_CPU_AFFINITY_FILE"
+
+    # ------------
     node_ip="$(hostname -I | awk '{print $1}')"
     [[ -n "$node_ip" ]] || { echo 'Cannot determine node IP.' >&2; exit 1; }
     args=(start --node-ip-address="$node_ip" --num-cpus="${SLURM_CPUS_PER_TASK:-288}" --num-gpus=4 --disable-usage-stats)
@@ -237,7 +268,8 @@ if [[ "$mode" == server ]]; then
         read -r RAY_ADDRESS < "$RUN_DIR/ray-address.txt"
         args+=(--address="$RAY_ADDRESS")
     fi
-    ray "${args[@]}"
+    # Restrict default CPU allocations to DRAM nodes 0-3
+    numactl --membind=0-3 ray "${args[@]}"
     if [[ "$SLURM_PROCID" == 0 ]]; then
         if [[ "$GYM_ENABLED" == 1 ]]; then
             curl --fail --silent --show-error --max-time 15 "$GYM_MATH_URL/" > "$RUN_DIR/gym-health.json"
